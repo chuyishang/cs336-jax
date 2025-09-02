@@ -63,8 +63,8 @@ def train_bpe(
                 pretokens.append(m.group(0))
         pretoken_counts = Counter()
         for chunk in pretokens:
-            byte_array = tuple([bytes(b, 'utf-8') for b in chunk])
-            # byte_array = tuple(chunk.encode('utf-8'))
+            encoded_bytes = chunk.encode('utf-8')
+            byte_array = tuple([bytes([b]) for b in encoded_bytes])
             pretoken_counts[byte_array] += 1
         return pretoken_counts
     
@@ -92,13 +92,9 @@ def train_bpe(
             new_pretokens[new_label] = count
         return new_pretokens
     
-    # Vocab initialization
     vocab = {i: bytes([i]) for i in range(256)} 
-    # vocab = {}
     for special_token in special_tokens:
         vocab[len(vocab)] = bytes(special_token, 'utf-8')
-    # for i in range(256):
-        # vocab[len(vocab)] = bytes([i])
     merges = []
     pretoken_counts = load_and_pretokenize(input_path, special_tokens)
     while len(vocab) < vocab_size:
