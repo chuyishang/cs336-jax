@@ -3,6 +3,16 @@ import regex as re
 
 from collections import Counter
 
+def _process_chunk(text: str, pattern: str) -> Counter[tuple[bytes]]:
+    """Helper function for multiprocessing in load_and_pretokenize."""
+    pretoken_counts = Counter()
+    for m in re.finditer(pattern, text):
+        chunk = m.group(0)
+        encoded_bytes = chunk.encode('utf-8')
+        byte_array = tuple([bytes([b]) for b in encoded_bytes])
+        pretoken_counts[byte_array] += 1
+    return pretoken_counts
+
 def train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
@@ -47,26 +57,41 @@ def train_bpe(
 
         Args:
             input_path: Path to corpus to load and pretokenize.
+            special_tokens: List of special tokens to handle during tokenization.
         
         Returns:
             Counter object corresponding to each pretoken and their counts.
             Each key is a tuple of bytes e.g. (b't', b'e', b's', b't')
         """
+        from multiprocessing import Pool, cpu_count
+        from functools import partial
+
+        # Read the corpus
         with open(input_path, "r") as f:
             corpus = f.read()
+        
+        # Prepare the regex pattern
         PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
         special_tokens_pat = "|".join([re.escape(s) for s in special_tokens])
+        
+        # Split corpus by special tokens
         corpus_parts = re.split(special_tokens_pat, corpus)
-        pretokens = []
-        pretoken_counts = Counter()
-        for part in corpus_parts:
-            for m in re.finditer(PAT, part):
-                pretokens.append(m.group(0))
-        for chunk in pretokens:
-            encoded_bytes = chunk.encode('utf-8')
-            byte_array = tuple([bytes([b]) for b in encoded_bytes])
-            pretoken_counts[byte_array] += 1
-        return pretoken_counts
+        
+        # Only use multiprocessing for larger corpora with multiple parts
+        if len(corpus_parts) > 1 and len(corpus) > 50000:  # Use multiprocessing for larger files
+            num_processes = min(cpu_count(), len(corpus_parts))
+            with Pool(num_processes) as pool:
+                chunk_counters = pool.map(partial(_process_chunk, pattern=PAT), corpus_parts)
+        else:
+            # Single-threaded for small files to avoid multiprocessing overhead
+            chunk_counters = [_process_chunk(part, PAT) for part in corpus_parts]
+        
+        # Combine all counters
+        final_counts = Counter()
+        for counter in chunk_counters:
+            final_counts.update(counter)
+        
+        return final_counts
 
     def count_pairs(pretokens: Counter[tuple[bytes]]) -> Counter[tuple[bytes, bytes]]:
         """Count all adjacent byte pairs in the pretokens."""
