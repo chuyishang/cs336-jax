@@ -29,13 +29,14 @@ def init_tokenizer(
     return Tokenizer(vocab, merges, special_tokens)
 
 
-def _process_chunk(pattern: str, text: str) -> list[list[bytes]]:
+def _process_chunk(pattern: str, text: str, special_tokens: list[str] | None) -> list[list[bytes]]:
+    if special_tokens and text in special_tokens:
+        return [[text.encode('utf-8')]]
     result = []
     for m in re.finditer(pattern, text):
         chunk = m.group(0)
         encoded_bytes = chunk.encode('utf-8')
         result.append([bytes([b]) for b in encoded_bytes])
-        # result.append(encoded_bytes)
     return result
 
 
@@ -67,10 +68,8 @@ class Tokenizer:
         for part in text_parts:
             if not part:
                 continue
-            elif self.special_tokens and part in self.special_tokens:
-                pretokens.append([part.encode('utf-8')])
             else:
-                pretokens.extend(_process_chunk(pattern=PAT, text=part))
+                pretokens.extend(_process_chunk(pattern=PAT, text=part, special_tokens=self.special_tokens))
         return pretokens
     
     
@@ -112,17 +111,15 @@ class Tokenizer:
         pretokens = self.pretokenize_text(text)
         token_list = self.merge_pretokens(pretokens)
         token_ids = self.convert_to_token_ids(token_list)
-        print("DONE3")
         return token_ids
 
 
     def decode(self, ids: list[int]) -> str:
-        # breakpoint()
         output = b"".join(self.vocab[id] for id in ids)
-        return output.decode('utf-8')
+        return output.decode('utf-8', errors='replace')
 
-
-    """
-    def encode_iterable(self, iterbale: Iterable[str]) -> Iterator[int]:
-        ...
-    """
+    def encode_iterable(self, iterable: Iterable[str]):
+        """Encode an iterable of strings, yielding token IDs one at a time."""
+        for text in iterable:
+            for token_id in self.encode(text):
+                yield token_id
