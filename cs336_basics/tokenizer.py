@@ -45,6 +45,7 @@ class Tokenizer:
         self.vocab = vocab
         self.merges = merges
         self.special_tokens = special_tokens
+        self.reverse_vocab = {v:k for k,v in vocab.items()}
 
     @classmethod 
     def from_files(cls, vocab_filepath: str, merges_filepath: str, special_tokens: list[str] | None = None):
@@ -72,7 +73,7 @@ class Tokenizer:
                 pretokens.extend(_process_chunk(pattern=PAT, text=part, special_tokens=self.special_tokens))
         return pretokens
     
-    
+    """
     def merge_single_pretoken(self, pretoken: list[bytes]) -> list[bytes]:  
         for merge in self.merges:
             new_pretoken = []
@@ -88,6 +89,27 @@ class Tokenizer:
             if len(pretoken) == 1:
                 break
         return pretoken
+    """ 
+
+    def find_best_merge(self, pretoken: list[bytes]) -> tuple[int, int]:
+        best_merge, merge_idx = None, None
+        for i in range(len(pretoken)-1):
+            candidate_pair = pretoken[i] + pretoken[i+1]
+            token_id = self.reverse_vocab.get(candidate_pair) # returns None by default if key doesn't exist
+            if (not best_merge and token_id) or (token_id and token_id < best_merge): # lol horrible code here
+                best_merge = token_id
+                merge_idx = i
+        return best_merge, merge_idx
+
+
+    def merge_single_pretoken(self, pretoken: list[bytes]) -> list[bytes]:
+        while True:
+            best_merge, merge_idx = self.find_best_merge(pretoken)
+            if not best_merge:
+                break
+            # breakpoint()
+            pretoken = pretoken[:merge_idx] + [self.vocab[best_merge]] + pretoken[merge_idx+2:]
+        return pretoken
         
 
     def merge_pretokens(self, pretokens: list[list[bytes]]) -> list[bytes]:
@@ -98,13 +120,9 @@ class Tokenizer:
     
     
     def convert_to_token_ids(self, token_list: list[bytes]) -> list[int]:
-        token_ids = []
-        for token in token_list:
-            for token_id, token_bytes in self.vocab.items():
-                if token_bytes == token:
-                    token_ids.append(token_id)
-                    break
-        return token_ids
+        # token_ids = []
+        # for token in token_list:
+        return [self.reverse_vocab[t] for t in token_list]
 
 
     def encode(self, text: str) -> list[int]:
@@ -120,6 +138,8 @@ class Tokenizer:
 
     def encode_iterable(self, iterable: Iterable[str]):
         """Encode an iterable of strings, yielding token IDs one at a time."""
-        for text in iterable:
-            for token_id in self.encode(text):
-                yield token_id
+        # for text in iterable:
+            # for token_id in self.encode(text):
+                # yield token_id
+        for item in iterable:
+            yield from self.encode(item)
