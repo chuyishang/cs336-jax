@@ -91,14 +91,15 @@ class Tokenizer:
         return pretoken
     """ 
 
-    def find_best_merge(self, pretoken: list[bytes]) -> tuple[int, int]:
+    def find_best_merge(self, pretoken: list[bytes]) -> tuple[int | None, int | None]:
         best_merge, merge_idx = None, None
         for i in range(len(pretoken)-1):
             candidate_pair = pretoken[i] + pretoken[i+1]
             token_id = self.reverse_vocab.get(candidate_pair) # returns None by default if key doesn't exist
-            if (not best_merge and token_id) or (token_id and token_id < best_merge): # lol horrible code here
-                best_merge = token_id
-                merge_idx = i
+            if token_id:
+                if not best_merge or token_id < best_merge: # lol horrible code here
+                    best_merge = token_id
+                    merge_idx = i
         return best_merge, merge_idx
 
 
