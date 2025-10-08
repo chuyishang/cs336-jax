@@ -205,8 +205,9 @@ def sdpa(
     S = einsum(Q, K, "... queries d_k, ... keys d_k -> ... queries keys")
     d_k = K.size(-1)
     S = S / (d_k) ** 0.5
+    # NOTE: we use mask == 0.0 here since it takes in a float tensor, but we can also use ~mask if using booleans
     if mask is not None:
-        S = S.masked_fill(~mask, float('-inf'))
+        S = S.masked_fill(mask == 0.0, float('-inf'))
     scores = softmax(S, dim=-1)
     output = einsum(scores, V, "... queries keys, ... keys d_v -> ... queries d_v")
     # output = scores @ V
@@ -233,6 +234,8 @@ class MultiHeadSelfAttention(nn.Module):
         self.K_proj = Linear(d_model, self.d_k * num_heads, device=device, dtype=dtype)
         self.V_proj = Linear(d_model, self.d_k * num_heads, device=device, dtype=dtype) # d_k since d_v = d_k in this case
         self.O_proj = Linear(d_model, d_model, device=device, dtype=dtype)
+        # Initialize causal mask
+        self.causal_mask = torch.tril(torch.ones(max_seq_len, max_seq_len, device=device))
         # Intialize RoPE Module 
         self.rope = RotaryPositionalEmbedding(self.d_k, theta=rope_theta, max_seq_len=max_seq_len, device=device)
 
@@ -248,11 +251,11 @@ class MultiHeadSelfAttention(nn.Module):
         Returns:
             Tensor after MHSA is applied.
         """
-        # x = x.reshape(-1, self.num_heads, -1, self.d_k)
         B, S, d_model = x.shape
         Q = self.Q_proj(x)
         K = self.K_proj(x)
         V = self.V_proj(x)
+        # NOTE: we need to first reshape, then transpose, since we want H to be the outer dim
         Q = Q.reshape(B, S, self.num_heads, self.d_k).transpose(1, 2)
         K = K.reshape(B, S, self.num_heads, self.d_k).transpose(1, 2)
         V = V.reshape(B, S, self.num_heads, self.d_k).transpose(1, 2)
@@ -260,8 +263,8 @@ class MultiHeadSelfAttention(nn.Module):
         if use_rope:
             Q = self.rope(Q, seq_pos)
             K = self.rope(K, seq_pos)
-        mask = torch.ones(S, S, device=x.device)
-        causal_mask = torch.tril(mask).bool()
+        # causal_mask = torch.tril(torch.ones(S, S, device=x.device))
+        causal_mask = self.causal_mask[:S, :S] # slice existing causal mask for efficiency
         sdpa_out = sdpa(Q, K, V, causal_mask)
         # NOTE: sdpa_out ~ [B, H, S, d_k]. need out to be [B, S, d_k]
         sdpa_out = sdpa_out.transpose(1, 2).contiguous().reshape(x.shape)
