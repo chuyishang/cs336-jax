@@ -390,7 +390,50 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    # Create the TransformerLM model
+    transformer_lm = model.TransformerLM(
+        d_model=d_model,
+        num_heads=num_heads, 
+        d_ff=d_ff,
+        theta=rope_theta,
+        vocab_size=vocab_size,
+        context_length=context_length,
+        num_layers=num_layers
+    )
+    
+    # Create state dict mapping from reference weights to our model structure
+    state_dict = {}
+    
+    # Token embeddings
+    state_dict['token_embeddings.weights'] = weights['token_embeddings.weight']
+    
+    # Transformer layers
+    for layer_idx in range(num_layers):
+        layer_prefix = f'layers.{layer_idx}'
+        # Attention weights
+        state_dict[f'layers.{layer_idx}.MHA.Q_proj.weights'] = weights[f'{layer_prefix}.attn.q_proj.weight']
+        state_dict[f'layers.{layer_idx}.MHA.K_proj.weights'] = weights[f'{layer_prefix}.attn.k_proj.weight']
+        state_dict[f'layers.{layer_idx}.MHA.V_proj.weights'] = weights[f'{layer_prefix}.attn.v_proj.weight']
+        state_dict[f'layers.{layer_idx}.MHA.O_proj.weights'] = weights[f'{layer_prefix}.attn.output_proj.weight']
+        
+        # FFN weights
+        state_dict[f'layers.{layer_idx}.SwiGLU.w1.weights'] = weights[f'{layer_prefix}.ffn.w1.weight']
+        state_dict[f'layers.{layer_idx}.SwiGLU.w2.weights'] = weights[f'{layer_prefix}.ffn.w2.weight']
+        state_dict[f'layers.{layer_idx}.SwiGLU.w3.weights'] = weights[f'{layer_prefix}.ffn.w3.weight']
+        
+        # Norm weights
+        state_dict[f'layers.{layer_idx}.RMSNorm1.weights'] = weights[f'{layer_prefix}.ln1.weight']
+        state_dict[f'layers.{layer_idx}.RMSNorm2.weights'] = weights[f'{layer_prefix}.ln2.weight']
+    
+    # Final layer norm and output projection
+    state_dict['ln1.weights'] = weights['ln_final.weight']
+    state_dict['linear.weights'] = weights['lm_head.weight']
+    
+    # Load the state dict
+    transformer_lm.load_state_dict(state_dict)
+    
+    # Run forward pass
+    return transformer_lm(in_indices)
 
 
 def run_rmsnorm(

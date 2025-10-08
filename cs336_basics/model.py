@@ -288,3 +288,22 @@ class TransformerBlock(nn.Module):
         x = x + self.SwiGLU(self.RMSNorm2(x))
         return x
 
+
+class TransformerLM(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int,
+                theta: float, vocab_size: int, 
+                context_length: int, num_layers: int):
+        super().__init__()
+        self.layers = nn.ModuleList([TransformerBlock(d_model, num_heads, d_ff, context_length, theta) for _ in range(num_layers)])
+        self.token_embeddings = Embedding(vocab_size, d_model)
+        self.ln1 = RMSNorm(d_model)
+        self.linear = Linear(d_model, vocab_size)
+
+    def forward(self, x):
+        x = self.token_embeddings(x)
+        for layer in self.layers:
+            x = layer(x)
+        x = self.linear(self.ln1(x))
+        # x = softmax(x, dim=-1)
+        return x
+
