@@ -237,7 +237,7 @@ class MultiHeadSelfAttention(nn.Module):
         self.rope = RotaryPositionalEmbedding(self.d_k, theta=rope_theta, max_seq_len=max_seq_len, device=device)
 
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, use_rope: bool = False):
         """Forward method for Multi-Head Self Attention.
 
         Args:
@@ -253,15 +253,16 @@ class MultiHeadSelfAttention(nn.Module):
         Q = self.Q_proj(x)
         K = self.K_proj(x)
         V = self.V_proj(x)
-        Q = Q.reshape(B, self.num_heads, S, self.d_k)
-        K = K.reshape(B, self.num_heads, S, self.d_k)
-        V = V.reshape(B, self.num_heads, S, self.d_k)
+        Q = Q.reshape(B, S, self.num_heads, self.d_k).transpose(1, 2)
+        K = K.reshape(B, S, self.num_heads, self.d_k).transpose(1, 2)
+        V = V.reshape(B, S, self.num_heads, self.d_k).transpose(1, 2)
         seq_pos = torch.arange(0, S, device=x.device)
-        rQ = self.rope(Q, seq_pos)
-        rK = self.rope(K, seq_pos)
+        if use_rope:
+            Q = self.rope(Q, seq_pos)
+            K = self.rope(K, seq_pos)
         mask = torch.ones(S, S, device=x.device)
         causal_mask = torch.tril(mask).bool()
-        sdpa_out = sdpa(rQ, rK, V, causal_mask)
+        sdpa_out = sdpa(Q, K, V, causal_mask)
         # NOTE: sdpa_out ~ [B, H, S, d_k]. need out to be [B, S, d_k]
         sdpa_out = sdpa_out.transpose(1, 2).contiguous().reshape(x.shape)
         out = self.O_proj(sdpa_out)
