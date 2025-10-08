@@ -270,3 +270,21 @@ class MultiHeadSelfAttention(nn.Module):
         sdpa_out = sdpa_out.transpose(1, 2).contiguous().reshape(x.shape)
         out = self.O_proj(sdpa_out)
         return out
+    
+
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int, 
+                 max_seq_len: int, theta: float):
+        super().__init__()
+        self.MHA = MultiHeadSelfAttention(d_model, num_heads, theta, max_seq_len)
+        # self.MHA2 = MultiHeadSelfAttention(d_model, num_heads, theta, max_seq_len)
+        self.RMSNorm1 = RMSNorm(d_model)
+        self.RMSNorm2 = RMSNorm(d_model)
+        self.SwiGLU = SwiGLU(d_model, d_ff)
+
+
+    def forward(self, x: torch.Tensor):
+        x = x + self.MHA(self.RMSNorm1(x), use_rope=True)
+        x = x + self.SwiGLU(self.RMSNorm2(x))
+        return x
+
