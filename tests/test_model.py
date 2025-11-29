@@ -3,6 +3,10 @@ import numpy
 import torch
 import torch.nn.functional as F
 
+import jax
+import jax.numpy as jnp
+from flax import nnx
+
 from .adapters import (
     run_multihead_self_attention_with_rope,
     run_rope,
@@ -16,6 +20,27 @@ from .adapters import (
     run_linear,
     run_embedding,
 )
+
+from .adapters import (
+    run_jax_linear,
+)
+
+def torch_to_jax(tensor: torch.Tensor) -> jnp.ndarray:
+    return jnp.array(tensor.cpu().numpy())
+
+def test_linear_jax(numpy_snapshot, ts_state_dict, in_embeddings, d_model, d_ff):
+    w1_weight = ts_state_dict[0]["layers.0.ffn.w1.weight"]
+    w1_weight = torch_to_jax(w1_weight)
+    in_embeddings = torch_to_jax(in_embeddings)
+    rngs = nnx.Rngs(42)
+    output = run_jax_linear(
+        rngs=rngs,
+        d_in=d_model,
+        d_out=d_ff,
+        weights=w1_weight,
+        in_features=in_embeddings,
+    )
+    numpy_snapshot.assert_match(output)
 
 
 def test_linear(numpy_snapshot, ts_state_dict, in_embeddings, d_model, d_ff):

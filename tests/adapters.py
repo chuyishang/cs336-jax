@@ -9,9 +9,13 @@ import numpy.typing as npt
 import torch
 from torch import Tensor
 
+import jax
+import jax.numpy as jnp
+from flax import nnx
+
 from cs336_basics import train_bpe
 from cs336_basics import tokenizer
-from cs336_basics import model
+from cs336_basics import model 
 
 
 def run_linear(
@@ -34,6 +38,30 @@ def run_linear(
     """
     linear_layer = model.Linear(d_in, d_out)
     linear_layer.load_state_dict({'weights': weights}) 
+    return linear_layer.forward(in_features)
+
+def run_jax_linear(
+    rngs: nnx.Rngs,
+    d_in: int,
+    d_out: int,
+    weights: Float[Tensor, " d_out d_in"],
+    in_features: Float[Tensor, " ... d_in"],
+) -> Float[Tensor, " ... d_out"]:
+    """
+    Given the weights of a Linear layer, compute the transformation of a batched input.
+
+    Args:
+        in_dim (int): The size of the input dimension
+        out_dim (int): The size of the output dimension
+        weights (Float[Tensor, "d_out d_in"]): The linear weights to use
+        in_features (Float[Tensor, "... d_in"]): The output tensor to apply the function to
+
+    Returns:
+        Float[Tensor, "... d_out"]: The transformed output of your linear module.
+    """
+    linear_layer = model.JaxLinear(rngs, d_in, d_out)
+    # linear_layer.load_state_dict({'weights': weights}) 
+    linear_layer.weights.set_value(weights)
     return linear_layer.forward(in_features)
 
 
