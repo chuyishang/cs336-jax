@@ -526,9 +526,15 @@ def run_rmsnorm(
         Float[Array,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
+    weights = tensor_to_array(weights)
+    in_features = tensor_to_array(in_features)
+
     rms_norm = model.RMSNorm(d_model, eps)
-    rms_norm.load_state_dict({'weights': weights})
-    return rms_norm.forward(in_features)  
+    rms_norm_state = State({
+        'weights': nnx.Param(weights)
+        })
+    nnx.update(rms_norm, rms_norm_state)
+    return rms_norm(in_features)  
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Array, " ..."]:

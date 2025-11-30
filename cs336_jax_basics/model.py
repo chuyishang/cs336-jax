@@ -20,7 +20,7 @@ class Linear(nnx.Module):
         weights = jnp.empty((out_features, in_features), device=device, dtype=dtype)
         std = (2 / (in_features + out_features)) ** 0.5
         weight_initializer = nnx.initializers.truncated_normal(stddev=std, lower=-3.0*std, upper=3.0*std, dtype=dtype)
-        weights = weight_initializer(rngs(), weights.shape, weights.dtype)
+        weights = weight_initializer(rngs.params(), weights.shape, weights.dtype)
         self.weights = nnx.Param(weights)
 
 
@@ -34,43 +34,40 @@ class Linear(nnx.Module):
 
 class Embedding(nnx.Module):
     def __init__(self, num_embeddings: int, embedding_dim: int, device: Device | None = None, dtype: jnp.dtype | None = None, rngs: nnx.Rngs | None = None):
-        raise NotImplementedError
-        # super().__init__()
-        # weights = torch.empty(num_embeddings, embedding_dim, device=device, dtype=dtype)
-        # std = (2 / (num_embeddings + embedding_dim)) ** 0.5
-        # nn.init.trunc_normal_(weights, mean=0.0, std=std, a=-3.0*std, b=3.0*std)
-        # self.weights = nn.Parameter(weights)
+        super().__init__()
+        if rngs is None:
+            rngs = nnx.Rngs(0)
+        weights = jnp.empty((num_embeddings, embedding_dim), device=device, dtype=dtype)
+        std = (2 / (num_embeddings + embedding_dim)) ** 0.5
+        weight_initializer = nnx.initializers.truncated_normal(stddev=std, lower=-3.0*std, upper=3.0*std, dtype=dtype)
+        weights = weight_initializer(rngs.params(), weights.shape, weights.dtype)
+        self.weights = nnx.Param(weights)
     
     def __call__(self, token_ids: Array) -> Array:
-        raise NotImplementedError
-        # """
-        # BSZ, S -> BSZ, S, D_model 
-        # """
-        # return self.weights[token_ids]
+        """
+        BSZ, S -> BSZ, S, D_model 
+        """
+        return self.weights[token_ids]
 
 
 class RMSNorm(nnx.Module):
     def __init__(self, d_model: int, eps: float = 1e-5, device: Device | None = None, dtype: jnp.dtype | None = None, rngs: nnx.Rngs | None = None):
-        raise NotImplementedError
-        # super().__init__()
-        # weights = torch.empty(d_model, device=device, dtype=dtype)
-        # std = (2 / (d_model)) ** 0.5
-        # nn.init.trunc_normal_(weights, mean=0.0, std=std, a=-3.0*std, b=3.0*std)
-        # self.weights = nn.Parameter(weights)
-        # self.eps = eps
+        if rngs is None:
+            rngs = nnx.Rngs(0)
+        weights = jnp.empty((d_model), device=device, dtype=dtype)
+        std = (2 / (d_model)) ** 0.5
+        weight_initializer = nnx.initializers.truncated_normal(stddev=std, lower=-3.0*std, upper=3.0*std, dtype=dtype)
+        weights = weight_initializer(rngs.params(), weights.shape, weights.dtype)
+        self.weights = nnx.Param(weights)
+        self.eps = eps
 
     def __call__(self, x: Array) -> Array:
-        raise NotImplementedError
-        # # x: [4, 12, 64] w: [64]
-        # print(x.shape, self.weights.shape)
-        # in_dtype = x.dtype
-        # x = x.to(torch.float32)
+        in_dtype = x.dtype
+        d_model = x.shape[-1]
+        rms_denom = (jnp.mean(x ** 2, axis=-1, keepdims=True) + self.eps) ** 0.5 
+        result = (x / rms_denom) * self.weights
 
-        # d_model = x.shape[-1]
-        # rms_denom = (torch.mean(x ** 2, dim=-1, keepdim=True) + self.eps) ** 0.5 
-        # result = (x / rms_denom) * self.weights
-
-        # return result.to(in_dtype)
+        return result.astype(in_dtype)
 
 
 class SwiGLU(nnx.Module):
