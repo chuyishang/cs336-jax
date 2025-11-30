@@ -21,7 +21,6 @@ def test_get_batch():
             dataset=dataset,
             batch_size=batch_size,
             context_length=context_length,
-            device=device,
         )
 
         # Make sure the shape is correct
@@ -58,15 +57,3 @@ def test_get_batch():
             raise ValueError(
                 f"Starting index {starting_index} occurs {count} times, but expected at most {occurrences_upper_bound}"
             )
-
-    with pytest.raises((RuntimeError, AssertionError)) as excinfo:
-        # We're assuming that cuda:99 is an invalid device ordinal.
-        # Just adding this here to make sure that the device flag is
-        # being handled.
-        run_get_batch(
-            dataset=dataset,
-            batch_size=batch_size,
-            context_length=context_length,
-            device="cuda:99",
-        )
-        assert "CUDA error" in str(excinfo.value) or "Torch not compiled with CUDA enabled" in str(excinfo.value)

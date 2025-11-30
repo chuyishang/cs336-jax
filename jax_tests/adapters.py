@@ -495,7 +495,7 @@ def run_silu(in_features: Float[Array, " ..."]) -> Float[Array, " ..."]:
 
 
 def run_get_batch(
-    dataset: npt.NDArray, batch_size: int, context_length: int, device: str
+    dataset: npt.NDArray, batch_size: int, context_length: int
 ) -> tuple[Array, Array]:
     """
     Given a dataset (a 1D numpy array of integers) and a desired batch size and
@@ -506,15 +506,13 @@ def run_get_batch(
         dataset (np.array): 1D numpy array of integer token IDs in the dataset.
         batch_size (int): Desired batch size to sample.
         context_length (int): Desired context length of each sampled example.
-        device (str): PyTorch device string (e.g., 'cpu' or 'cuda:0') indicating the device
-            to place the sampled input sequences and labels on.
 
     Returns:
         Tuple of jax.Arrays of shape (batch_size, context_length). The first tuple item
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    return model.get_batch(dataset, batch_size, context_length, device)
+    return model.get_batch(nnx.Rngs(0), dataset, batch_size, context_length)
 
 
 def run_softmax(in_features: Float[Array, " ..."], dim: int) -> Float[Array, " ..."]:

@@ -373,13 +373,13 @@ def gradient_clipping(gradient_state: State, max_l2_norm: float, eps = 1e-6) -> 
     return gradient_state
 
 
-def get_batch(dataset: npt.NDArray, batch_size: int, context_length: int, device: str) -> tuple[Array, Array]:
-    start_indices = torch.randint(0, len(dataset) - context_length, (batch_size,))
+def get_batch(rngs: nnx.Rngs, dataset: npt.NDArray, batch_size: int, context_length: int) -> tuple[Array, Array]:
+    start_indices = jax.random.randint(rngs(), (batch_size,), 0, len(dataset) - context_length)
     batch = []
     for start in start_indices: 
-        batch_item = torch.tensor(dataset[start : start+context_length + 1])
+        batch_item = jnp.array(dataset[start : start+context_length + 1])
         batch.append(batch_item)
-    batch = torch.stack(batch, dim=0).to(device)
+    batch = jnp.concatenate(batch, axis=0)
     # B, S + 1
     train_batch = batch[:, :-1]
     target_batch = batch[:, 1:]

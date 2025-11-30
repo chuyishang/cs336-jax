@@ -7,6 +7,10 @@ from typing import Optional
 import numpy as np
 import torch
 import yaml
+import jax
+import jax.numpy as jnp
+from flax import nnx
+from flax.nnx import State
 
 from cs336_jax_basics import model as model_module
 
@@ -85,7 +89,7 @@ def get_batch_from_memmap(
 
 @torch.no_grad()
 def estimate_loss(
-    model: torch.nn.Module,
+    model: nnx.Module,
     train_dataset: MemMapDataset,
     val_dataset: Optional[MemMapDataset],
     config: dict,
@@ -100,13 +104,11 @@ def estimate_loss(
         train_dataset: Training dataset
         val_dataset: Validation dataset (optional)
         config: Configuration dictionary
-        device: Device to run evaluation on
         eval_iters: Number of iterations to evaluate
 
     Returns:
         Dictionary with 'train' and 'val' losses
     """
-    model.eval()
     losses = {}
 
     batch_size = config['eval'].get('eval_batch_size', config['training']['batch_size'])
@@ -144,7 +146,6 @@ def estimate_loss(
             val_losses.append(loss.item())
         losses['val'] = np.mean(val_losses)
 
-    model.train()
     return losses
 
 
@@ -184,6 +185,7 @@ def train(config_path: str, use_wandb: bool = False, run_name: Optional[str] = N
     # Initialize model
     print("\nInitializing model...")
     model = model_module.TransformerLM(
+        rngs=nnx.Rngs(0),
         d_model=config['model']['d_model'],
         num_heads=config['model']['num_heads'],
         d_ff=config['model']['d_ff'],
@@ -191,7 +193,7 @@ def train(config_path: str, use_wandb: bool = False, run_name: Optional[str] = N
         vocab_size=config['model']['vocab_size'],
         context_length=config['model']['context_length'],
         num_layers=config['model']['num_layers']
-    ).to(device)
+    )
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
