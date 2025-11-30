@@ -305,7 +305,6 @@ def run_transformer_block(
         running the Transformer block on the input features while using RoPE.
     """
     TransformerBlock = model.TransformerBlock(rngs=nnx.Rngs(0), d_model=d_model, num_heads=num_heads, d_ff=d_ff, max_seq_len=max_seq_len, theta=theta)
-    print(nnx.to_pure_dict(nnx.state(TransformerBlock)).keys())
     TransformerBlock_state = State(
         {
             'MHA': create_mha_state(weights['attn.q_proj.weight'], weights['attn.k_proj.weight'], weights['attn.v_proj.weight'], weights['attn.output_proj.weight']),

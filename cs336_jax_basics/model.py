@@ -14,6 +14,7 @@ import numpy.typing as npt
 from collections.abc import Callable, Iterable
 from typing import Optional
 import math
+import pickle
 
 class Linear(nnx.Module):
     def __init__(self, rngs: nnx.Rngs, in_features: int, out_features: int, dtype: jnp.dtype = jnp.float32):
@@ -387,32 +388,32 @@ def get_batch(dataset: npt.NDArray, batch_size: int, context_length: int, device
 
 
 def save_checkpoint(
-    model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
+    model: nnx.Module,
+    optimizer: nnx.Optimizer,
     iteration: int,
     out,
 ):
-    raise NotImplementedError
-    # state = model.state_dict()
-    # optimizer_state = optimizer.state_dict()
-    # obj = {
-    #     "model": state,
-    #     "optimizer": optimizer_state,
-    #     "iteration": iteration,
-    # }
+    state = nnx.state(model)
+    optimizer_state = optimizer.state
+    obj = {
+        "model": state,
+        "optimizer": optimizer_state,
+        "iteration": iteration,
+    }
 
-    # torch.save(obj, out)
+    with open(out, "wb") as f:
+        pickle.dump(obj, f)
 
 def load_checkpoint(
     src,
-    model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
+    model: nnx.Module,
+    optimizer: nnx.Optimizer,
 ):
-    raise NotImplementedError
-    # obj = torch.load(src)
-    # model.load_state_dict(obj["model"])
-    # optimizer.load_state_dict(obj["optimizer"])
+    with open(src, "rb") as f:
+        obj = pickle.load(f)
+    nnx.update(model, obj["model"])
+    optimizer.state = obj["optimizer"]
 
-    # return obj["iteration"]
+    return obj["iteration"]
 
 
