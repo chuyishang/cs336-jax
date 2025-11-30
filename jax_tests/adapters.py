@@ -18,11 +18,21 @@ from cs336_jax_basics import model
 from .common import create_linear_layer_state, create_embedding_state, create_rmsnorm_state, create_swiglu_state, create_mha_state
 from .conftest import tensor_to_array
 
+def perpetual_rngs(seed: int):
+    rngs = nnx.Rngs(seed)
+    def create_wrapper(function: Callable[..., Any]):
+        def wrapper(*args, **kwargs):
+            return function(*args, **kwargs, rngs=rngs)
+        return wrapper
+    return create_wrapper
+
+@perpetual_rngs(0)
 def run_linear(
     d_in: int,
     d_out: int,
     weights: Float[Array, " d_out d_in"],
     in_features: Float[Array, " ... d_in"],
+    rngs: nnx.Rngs
 ) -> Float[Array, " ... d_out"]:
     """
     Given the weights of a Linear layer, compute the transformation of a batched input.
@@ -36,17 +46,18 @@ def run_linear(
     Returns:
         Float[Array, "... d_out"]: The transformed output of your linear module.
     """
-    linear_layer = model.Linear(rngs=nnx.Rngs(0), in_features=d_in, out_features=d_out)
+    linear_layer = model.Linear(rngs=rngs, in_features=d_in, out_features=d_out)
     linear_layer_state = create_linear_layer_state(weights)
     nnx.update(linear_layer, linear_layer_state)
     return linear_layer(in_features)
 
-
+@perpetual_rngs(1)
 def run_embedding(
     vocab_size: int,
     d_model: int,
     weights: Float[Array, " vocab_size d_model"],
     token_ids: Int[Array, " ..."],
+    rngs: nnx.Rngs
 ) -> Float[Array, " ... d_model"]:
     """
     Given the weights of an Embedding layer, get the embeddings for a batch of token ids.
@@ -60,13 +71,14 @@ def run_embedding(
     Returns:
         Float[Array, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-    embedding = model.Embedding(rngs=nnx.Rngs(0), num_embeddings=vocab_size, embedding_dim=d_model)
+    embedding = model.Embedding(rngs=rngs, num_embeddings=vocab_size, embedding_dim=d_model)
     embedding_state = create_embedding_state(weights)
     nnx.update(embedding, embedding_state)
     return embedding(token_ids)
 
 
 
+@perpetual_rngs(2)
 def run_swiglu(
     d_model: int,
     d_ff: int,
@@ -74,6 +86,7 @@ def run_swiglu(
     w2_weight: Float[Array, " d_model d_ff"],
     w3_weight: Float[Array, " d_ff d_model"],
     in_features: Float[Array, " ... d_model"],
+    rngs: nnx.Rngs
 ) -> Float[Array, " ... d_model"]:
     """Given the weights of a SwiGLU network, return
     the output of your implementation with these weights.
@@ -96,7 +109,7 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    swiglu = model.SwiGLU(rngs=nnx.Rngs(0), d_model=d_model, d_ff=d_ff)
+    swiglu = model.SwiGLU(rngs=rngs, d_model=d_model, d_ff=d_ff)
     swiglu_state = create_swiglu_state(w1_weight, w2_weight, w3_weight)
     nnx.update(swiglu, swiglu_state)
     # swiglu.w1.weights.data = w1_weight
@@ -127,6 +140,7 @@ def run_scaled_dot_product_attention(
     return model.sdpa(Q, K, V, mask)
 
 
+@perpetual_rngs(3)
 def run_multihead_self_attention(
     d_model: int,
     num_heads: int,
@@ -135,6 +149,7 @@ def run_multihead_self_attention(
     v_proj_weight: Float[Array, " d_v d_in"],
     o_proj_weight: Float[Array, " d_model d_v"],
     in_features: Float[Array, " ... sequence_length d_in"],
+    rngs: nnx.Rngs
 ) -> Float[Array, " ... sequence_length d_out"]:
     """
     Given the key, query, and value projection weights of a naive unbatched
@@ -158,14 +173,14 @@ def run_multihead_self_attention(
         Float[Array, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    MHA = model.MultiHeadSelfAttention(rngs=nnx.Rngs(0), d_model=d_model, num_heads=num_heads)
+    MHA = model.MultiHeadSelfAttention(rngs=rngs, d_model=d_model, num_heads=num_heads)
     MHA_state = create_mha_state(q_proj_weight, k_proj_weight, v_proj_weight, o_proj_weight)
     nnx.update(MHA, MHA_state)
     out = MHA(in_features, use_rope=False)
     return out
     
 
-
+@perpetual_rngs(4)
 def run_multihead_self_attention_with_rope(
     d_model: int,
     num_heads: int,
@@ -176,6 +191,7 @@ def run_multihead_self_attention_with_rope(
     v_proj_weight: Float[Array, " d_v d_in"],
     o_proj_weight: Float[Array, " d_model d_v"],
     in_features: Float[Array, " ... sequence_length d_in"],
+    rngs: nnx.Rngs,
     token_positions: Int[Array, " ... sequence_length"] | None = None,
 ) -> Float[Array, " ... sequence_length d_out"]:
     """
@@ -203,7 +219,7 @@ def run_multihead_self_attention_with_rope(
         Float[Array, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    MHA = model.MultiHeadSelfAttention(rngs=nnx.Rngs(0), d_model=d_model, num_heads=num_heads, rope_theta=theta, max_seq_len=max_seq_len)
+    MHA = model.MultiHeadSelfAttention(rngs=rngs, d_model=d_model, num_heads=num_heads, rope_theta=theta, max_seq_len=max_seq_len)
     MHA_state = create_mha_state(q_proj_weight, k_proj_weight, v_proj_weight, o_proj_weight)
     nnx.update(MHA, MHA_state)
     out = MHA(in_features, use_rope=True)
@@ -234,6 +250,7 @@ def run_rope(
     return result
 
 
+@perpetual_rngs(5)
 def run_transformer_block(
     d_model: int,
     num_heads: int,
@@ -242,6 +259,7 @@ def run_transformer_block(
     theta: float,
     weights: dict[str, Array],
     in_features: Float[Array, " batch sequence_length d_model"],
+    rngs: nnx.Rngs
 ) -> Float[Array, " batch sequence_length d_model"]:
     """
     Given the weights of a pre-norm Transformer block and input features,
@@ -304,7 +322,7 @@ def run_transformer_block(
         Float[Array, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    TransformerBlock = model.TransformerBlock(rngs=nnx.Rngs(0), d_model=d_model, num_heads=num_heads, d_ff=d_ff, max_seq_len=max_seq_len, theta=theta)
+    TransformerBlock = model.TransformerBlock(rngs=rngs, d_model=d_model, num_heads=num_heads, d_ff=d_ff, max_seq_len=max_seq_len, theta=theta)
     TransformerBlock_state = State(
         {
             'MHA': create_mha_state(weights['attn.q_proj.weight'], weights['attn.k_proj.weight'], weights['attn.v_proj.weight'], weights['attn.output_proj.weight']),
@@ -318,6 +336,7 @@ def run_transformer_block(
     return out
 
 
+@perpetual_rngs(6)
 def run_transformer_lm(
     vocab_size: int,
     context_length: int,
@@ -328,6 +347,7 @@ def run_transformer_lm(
     rope_theta: float,
     weights: dict[str, Array],
     in_indices: Int[Array, " batch_size sequence_length"],
+    rngs: nnx.Rngs
 ) -> Float[Array, " batch_size sequence_length vocab_size"]:
     """Given the weights of a Transformer language model and input indices,
     return the output of running a forward pass on the input indices.
@@ -399,7 +419,7 @@ def run_transformer_lm(
     """
     # Create the TransformerLM model
     transformer_lm = model.TransformerLM(
-        rngs=nnx.Rngs(0),
+        rngs=rngs,
         d_model=d_model,
         num_heads=num_heads, 
         d_ff=d_ff,
@@ -454,11 +474,13 @@ def run_transformer_lm(
     return transformer_lm(in_indices)
 
 
+@perpetual_rngs(7)
 def run_rmsnorm(
     d_model: int,
     eps: float,
     weights: Float[Array, " d_model"],
     in_features: Float[Array, " ... d_model"],
+    rngs: nnx.Rngs
 ) -> Float[Array, " ... d_model"]:
     """Given the weights of a RMSNorm affine transform,
     return the output of running RMSNorm on the input features.
@@ -474,7 +496,7 @@ def run_rmsnorm(
         Float[Array,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    rms_norm = model.RMSNorm(rngs=nnx.Rngs(0), d_model=d_model, eps=eps)
+    rms_norm = model.RMSNorm(rngs=rngs, d_model=d_model, eps=eps)
     rms_norm_state = create_rmsnorm_state(weights)
     nnx.update(rms_norm, rms_norm_state)
     return rms_norm(in_features)  
@@ -494,8 +516,9 @@ def run_silu(in_features: Float[Array, " ..."]) -> Float[Array, " ..."]:
     return model.SwiGLU.SiLu(in_features)
 
 
+@perpetual_rngs(8)
 def run_get_batch(
-    dataset: npt.NDArray, batch_size: int, context_length: int
+    dataset: npt.NDArray, batch_size: int, context_length: int, rngs: nnx.Rngs
 ) -> tuple[Array, Array]:
     """
     Given a dataset (a 1D numpy array of integers) and a desired batch size and
@@ -512,7 +535,7 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    return model.get_batch(nnx.Rngs(0), dataset, batch_size, context_length)
+    return model.get_batch(rngs, dataset, batch_size, context_length)
 
 
 def run_softmax(in_features: Float[Array, " ..."], dim: int) -> Float[Array, " ..."]:

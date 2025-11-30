@@ -374,12 +374,13 @@ def gradient_clipping(gradient_state: State, max_l2_norm: float, eps = 1e-6) -> 
 
 
 def get_batch(rngs: nnx.Rngs, dataset: npt.NDArray, batch_size: int, context_length: int) -> tuple[Array, Array]:
-    start_indices = jax.random.randint(rngs(), (batch_size,), 0, len(dataset) - context_length)
+    start_indices = jax.random.randint(rngs.params(), shape=(batch_size,), minval=0, maxval=len(dataset) - context_length)
     batch = []
     for start in start_indices: 
         batch_item = jnp.array(dataset[start : start+context_length + 1])
         batch.append(batch_item)
-    batch = jnp.concatenate(batch, axis=0)
+    batch = jnp.stack(batch, axis=0)
+
     # B, S + 1
     train_batch = batch[:, :-1]
     target_batch = batch[:, 1:]

@@ -28,7 +28,7 @@ def test_get_batch():
         assert y.shape == (batch_size, context_length)
 
         # Make sure the y's are always offset by 1
-        np.testing.assert_allclose((x + 1).detach().numpy(), y.detach().numpy())
+        np.testing.assert_allclose((x + 1), y)
 
         starting_indices.update(x[:, 0].tolist())
 

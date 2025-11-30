@@ -32,7 +32,7 @@ def _optimize(opt_class) -> State:
     rngs = nnx.Rngs(0)
     # Use 1000 optimization steps for testing
     for _ in range(1000):
-        x = jax.random.uniform(rngs(), shape=(model.in_features,))
+        x = jax.random.uniform(rngs.params(), shape=(model.in_features,))
         y = jnp.array([x[0] + x[1], -x[2]])
         loss, grad_state = nnx.value_and_grad(lambda model: ((model(x) - y) ** 2).mean())(model)
         opt.update(model, grad_state)
