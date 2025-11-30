@@ -22,7 +22,8 @@ from .adapters import (
 )
 
 from .adapters import (
-    run_jax_linear,
+    run_linear_jax,
+    run_embedding_jax,
 )
 
 def torch_to_jax(tensor: torch.Tensor) -> jnp.ndarray:
@@ -32,9 +33,7 @@ def test_linear_jax(numpy_snapshot, ts_state_dict, in_embeddings, d_model, d_ff)
     w1_weight = ts_state_dict[0]["layers.0.ffn.w1.weight"]
     w1_weight = torch_to_jax(w1_weight)
     in_embeddings = torch_to_jax(in_embeddings)
-    rngs = nnx.Rngs(42)
-    output = run_jax_linear(
-        rngs=rngs,
+    output = run_linear_jax(
         d_in=d_model,
         d_out=d_ff,
         weights=w1_weight,
@@ -50,6 +49,19 @@ def test_linear(numpy_snapshot, ts_state_dict, in_embeddings, d_model, d_ff):
         d_out=d_ff,
         weights=w1_weight,
         in_features=in_embeddings,
+    )
+    numpy_snapshot.assert_match(output)
+
+
+def test_embedding_jax(numpy_snapshot, ts_state_dict, in_indices, vocab_size, d_model):
+    embedding_weight = ts_state_dict[0]["token_embeddings.weight"]
+    embedding_weight = torch_to_jax(embedding_weight)
+    in_indices = torch_to_jax(in_indices)
+    output = run_embedding_jax(
+        vocab_size=vocab_size,
+        d_model=d_model,
+        weights=embedding_weight,
+        token_ids=in_indices,
     )
     numpy_snapshot.assert_match(output)
 

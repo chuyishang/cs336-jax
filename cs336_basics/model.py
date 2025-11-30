@@ -11,6 +11,23 @@ import jax
 import jax.numpy as jnp
 from flax import nnx
 
+
+class JaxLinear(nnx.Module):
+    def __init__(self, rngs: nnx.Rngs, in_features: int, out_features: int, dtype: jnp.dtype = jnp.float32):
+        super().__init__()
+        std = (2 / (in_features + out_features)) ** 0.5
+        # Initialize weights using the initializer
+        init_fn = nnx.initializers.truncated_normal(stddev=std, lower=-3.0*std, upper=3.0*std)
+        weights_data = init_fn(rngs.params(), (out_features, in_features), dtype)
+        self.weights = nnx.Param(weights_data)
+
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        """
+        Performs y = Wx
+        """
+        return jnp.einsum("...i,oi->...o", x, self.weights.get_value())
+
+
 class Linear(nn.Module):
     def __init__(self, in_features: int, out_features: int, device: torch.device | None = None, dtype: torch.dtype | None = None):
         super().__init__()
@@ -27,20 +44,17 @@ class Linear(nn.Module):
         # return x @ self.weights # this is equivalent
         return einsum(x, self.weights, "... d_in,  d_out d_in -> ... d_out")
 
-class JaxLinear(nnx.Module):
-    def __init__(self, rngs: nnx.Rngs, in_features: int, out_features: int, dtype: jnp.dtype = jnp.float32):
-        super().__init__()
-        std = (2 / (in_features + out_features)) ** 0.5
-        # Initialize weights using the initializer
-        init_fn = nnx.initializers.truncated_normal(stddev=std, lower=-3.0*std, upper=3.0*std)
-        weights_data = init_fn(rngs.params(), (out_features, in_features), dtype)
-        self.weights = nnx.Param(weights_data)
 
-    def forward(self, x: jnp.ndarray) -> jnp.ndarray:
-        """
-        Performs y = Wx
-        """
-        return jnp.einsum('...i,oi->...o', x, self.weights.get_value())
+class JaxEmbedding(nnx.Module):
+    def __init__(self, rngs: nnx.Rngs, num_embeddings: int, embedding_dim: int, dtype: jnp.dtype = jnp.float32):
+        super().__init__()
+        std = (2 / (num_embeddings + embedding_dim)) ** 0.5
+        init_fn = nnx.initializers.truncated_normal(stddev=std, lower=-3.0*std, upper=3.0*std)
+        weights_data = init_fn(rngs.params(), (num_embeddings, embedding_dim), dtype)
+        self.weights = nnx.Param(weights_data)
+    
+    def __call__(self, token_ids: jnp.ndarray) -> jnp.ndarray:
+        return self.weights.get_value()[token_ids]
 
 
 class Embedding(torch.nn.Module):

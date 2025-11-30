@@ -18,6 +18,33 @@ from cs336_basics import tokenizer
 from cs336_basics import model 
 
 
+def run_linear_jax(
+    d_in: int,
+    d_out: int,
+    weights: Float[jnp.ndarray, " d_out d_in"],
+    in_features: Float[jnp.ndarray, " ... d_in"],
+) -> Float[jnp.ndarray, " ... d_out"]:
+    """
+    Given the weights of a Linear layer, compute the transformation of a batched input.
+
+    Args:
+        in_dim (int): The size of the input dimension
+        out_dim (int): The size of the output dimension
+        weights (Float[jnp.ndarray, "d_out d_in"]): The linear weights to use
+        in_features (Float[jnp.ndarray, "... d_in"]): The output tensor to apply the function to
+
+    Returns:
+        Float[jnp.ndarray, "... d_out"]: The transformed output of your linear module.
+    """
+    linear_layer = model.JaxLinear(nnx.Rngs(0), d_in, d_out)
+    nnx.update(linear_layer, {'weights': weights})
+    # ?: is the following method more jax-like?
+    # graphdef, state = nnx.split(linear_layer)
+    # state['weights'] = weights
+    # linear_layer = nnx.merge(graphdef, state)
+    return linear_layer(in_features)
+
+
 def run_linear(
     d_in: int,
     d_out: int,
@@ -40,29 +67,28 @@ def run_linear(
     linear_layer.load_state_dict({'weights': weights}) 
     return linear_layer.forward(in_features)
 
-def run_jax_linear(
-    rngs: nnx.Rngs,
-    d_in: int,
-    d_out: int,
-    weights: Float[Tensor, " d_out d_in"],
-    in_features: Float[Tensor, " ... d_in"],
-) -> Float[Tensor, " ... d_out"]:
+
+def run_embedding_jax(
+    vocab_size: int,
+    d_model: int,
+    weights: Float[jnp.ndarray, " vocab_size d_model"],
+    token_ids: Int[jnp.ndarray, " ..."],
+) -> Float[Tensor, " ... d_model"]:
     """
-    Given the weights of a Linear layer, compute the transformation of a batched input.
+    Given the weights of an Embedding layer, get the embeddings for a batch of token ids.
 
     Args:
-        in_dim (int): The size of the input dimension
-        out_dim (int): The size of the output dimension
-        weights (Float[Tensor, "d_out d_in"]): The linear weights to use
-        in_features (Float[Tensor, "... d_in"]): The output tensor to apply the function to
+        vocab_size (int): The number of embeddings in the vocabulary
+        d_model (int): The size of the embedding dimension
+        weights (Float[jnp.ndarray, "vocab_size d_model"]): The embedding vectors to fetch from
+        token_ids (Int[jnp.ndarray, "..."]): The set of token ids to fetch from the Embedding layer
 
     Returns:
-        Float[Tensor, "... d_out"]: The transformed output of your linear module.
+        Float[jnp.ndarray, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-    linear_layer = model.JaxLinear(rngs, d_in, d_out)
-    # linear_layer.load_state_dict({'weights': weights}) 
-    linear_layer.weights.set_value(weights)
-    return linear_layer.forward(in_features)
+    embedding = model.JaxEmbedding(nnx.Rngs(0), vocab_size, d_model)
+    nnx.update(embedding, {'weights': weights})
+    return embedding(token_ids)
 
 
 def run_embedding(
