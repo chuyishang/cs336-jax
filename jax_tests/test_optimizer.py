@@ -1,46 +1,59 @@
 import numpy
 import torch
+import jax
+import jax.numpy as jnp
+import flax
+from flax import nnx
+from flax.nnx import State
+import optax
 
 from .adapters import get_adamw_cls, run_get_lr_cosine_schedule
+from .conftest import tensor_to_array
 
 
-def _optimize(opt_class) -> torch.Tensor:
-    torch.manual_seed(42)
-    model = torch.nn.Linear(3, 2, bias=False)
-    opt = opt_class(
-        model.parameters(),
-        lr=1e-3,
-        weight_decay=0.01,
-        betas=(0.9, 0.999),
-        eps=1e-8,
-    )
+def _optimize(opt_class) -> State:
+    model = nnx.Linear(3, 2, rngs=nnx.Rngs(0), use_bias=False)
+    try:
+        opt = opt_class(
+            model=model,
+            lr=1e-3,
+            weight_decay=0.01,
+            betas=(0.9, 0.999),
+            eps=1e-8,
+        )
+    except TypeError:
+        opt = opt_class(
+            lr=1e-3,
+            weight_decay=0.01,
+            betas=(0.9, 0.999),
+            eps=1e-8,
+        )
+
+    rngs = nnx.Rngs(0)
     # Use 1000 optimization steps for testing
     for _ in range(1000):
-        opt.zero_grad()
-        x = torch.rand(model.in_features)
-        y_hat = model(x)
-        y = torch.tensor([x[0] + x[1], -x[2]])
-        loss = ((y - y_hat) ** 2).sum()
-        loss.backward()
-        opt.step()
-    return model.weight.detach()
+        x = jax.random.uniform(rngs(), shape=(model.in_features,))
+        y = jnp.array([x[0] + x[1], -x[2]])
+        loss, grad_state = nnx.value_and_grad(lambda model: ((model(x) - y) ** 2).mean())(model)
+        opt.update(model, grad_state)
+    return jnp.concatenate(jax.tree.leaves(nnx.state(model)))
 
 
 def test_adamw(numpy_snapshot):
     """
     Our reference implementation yields slightly different results than the
-    PyTorch AdamW, since there are a couple different ways that you can apply
+    Optax AdamW, since there are a couple different ways that you can apply
     weight decay that are equivalent in principle, but differ in practice due to
     floating point behavior. So, we test that the provided implementation matches
-    _either_ our reference implementation's expected results or those from the PyTorch AdamW.
+    _either_ our reference implementation's expected results or those from the Optax AdamW.
     """
     # expected_weights = torch.load(FIXTURES_PATH / "adamw_expected_params.pt")
-    pytorch_weights = _optimize(torch.optim.AdamW)
+    optax_weights = _optimize(lambda model, lr, weight_decay, betas, eps: nnx.Optimizer(model, optax.adamw(learning_rate=lr, weight_decay=weight_decay, b1=betas[0], b2=betas[1], eps=eps), wrt=nnx.Param))
     actual_weights = _optimize(get_adamw_cls())
 
-    # Might need to exit early if the weights match pytorch, since that should also be valid
-    matches_pytorch = torch.allclose(actual_weights, pytorch_weights, atol=1e-4)
-    if matches_pytorch:
+    # Might need to exit early if the weights match optax, since that should also be valid
+    matches_optax = jnp.allclose(actual_weights, optax_weights, atol=1e-4)
+    if matches_optax:
         return
 
     numpy_snapshot.assert_match(

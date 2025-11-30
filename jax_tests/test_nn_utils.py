@@ -2,8 +2,15 @@ import numpy
 import torch
 import torch.nn.functional as F
 from torch.nn.utils.clip_grad import clip_grad_norm_
+import jax
+import jax.numpy as jnp
+import optax
+from flax import nnx
+from flax.nnx import State
 
 from .adapters import run_cross_entropy, run_gradient_clipping, run_softmax
+
+from .conftest import tensor_to_array, array_to_tensor
 
 
 def test_softmax_matches_pytorch():
@@ -15,17 +22,17 @@ def test_softmax_matches_pytorch():
         ]
     )
     expected = F.softmax(x, dim=-1)
-    numpy.testing.assert_allclose(run_softmax(x, dim=-1).detach().numpy(), expected.detach().numpy(), atol=1e-6)
+    numpy.testing.assert_allclose(run_softmax(tensor_to_array(x), dim=-1), expected.detach().numpy(), atol=1e-6)
     # Test that softmax handles numerical overflow issues
     numpy.testing.assert_allclose(
-        run_softmax(x + 100, dim=-1).detach().numpy(),
+        run_softmax(tensor_to_array(x + 100), dim=-1),
         expected.detach().numpy(),
         atol=1e-6,
     )
 
 
 def test_cross_entropy():
-    inputs = torch.tensor(
+    inputs_tensor = torch.tensor(
         [
             [
                 [0.1088, 0.1060, 0.6683, 0.5131, 0.0645],
@@ -41,49 +48,59 @@ def test_cross_entropy():
             ],
         ]
     )
-    targets = torch.tensor([[1, 0, 2, 2], [4, 1, 4, 0]])
-    expected = F.cross_entropy(inputs.view(-1, inputs.size(-1)), targets.view(-1))
+    inputs_array = tensor_to_array(inputs_tensor)
+
+    targets_tensor = torch.tensor([[1, 0, 2, 2], [4, 1, 4, 0]])
+    targets_array = tensor_to_array(targets_tensor)
+
+    expected_torch = F.cross_entropy(inputs_tensor.view(-1, inputs_tensor.size(-1)), targets_tensor.view(-1))
+    expected_jax = optax.softmax_cross_entropy(inputs_array.reshape(-1, inputs_array.shape[-1]), jax.nn.one_hot(targets_array.reshape(-1), inputs_array.shape[-1])).mean()
     numpy.testing.assert_allclose(
-        run_cross_entropy(inputs.view(-1, inputs.size(-1)), targets.view(-1)).detach().numpy(),
-        expected.detach().numpy(),
+        run_cross_entropy(inputs_array.reshape(-1, inputs_array.shape[-1]), targets_array.reshape(-1)),
+        expected_torch.detach().numpy(),
+        atol=1e-4,
+    )
+    numpy.testing.assert_allclose(
+        run_cross_entropy(inputs_array.reshape(-1, inputs_array.shape[-1]), targets_array.reshape(-1)),
+        expected_jax,
         atol=1e-4,
     )
 
     # Test that cross-entropy handles numerical overflow issues
-    large_inputs = 1000.0 * inputs
-    large_expected_cross_entropy = F.cross_entropy(large_inputs.view(-1, large_inputs.size(-1)), targets.view(-1))
+    large_inputs_tensor = 1000.0 * inputs_tensor
+    large_inputs_array = tensor_to_array(large_inputs_tensor)
+
+    large_expected_cross_entropy_torch = F.cross_entropy(large_inputs_tensor.view(-1, large_inputs_tensor.size(-1)), targets_tensor.view(-1))
+    large_expected_cross_entropy_jax = optax.softmax_cross_entropy(large_inputs_array.reshape(-1, large_inputs_array.shape[-1]), jax.nn.one_hot(targets_array.reshape(-1), large_inputs_array.shape[-1])).mean()
     numpy.testing.assert_allclose(
-        run_cross_entropy(large_inputs.view(-1, large_inputs.size(-1)), targets.view(-1)).detach().numpy(),
-        large_expected_cross_entropy.detach().numpy(),
+        run_cross_entropy(large_inputs_array.reshape(-1, large_inputs_array.shape[-1]), targets_array.reshape(-1)),
+        large_expected_cross_entropy_torch.detach().numpy(),
+        atol=1e-4,
+    )
+    numpy.testing.assert_allclose(
+        run_cross_entropy(large_inputs_array.reshape(-1, large_inputs_array.shape[-1]), targets_array.reshape(-1)),
+        large_expected_cross_entropy_jax,
         atol=1e-4,
     )
 
 
 def test_gradient_clipping():
-    tensors = [torch.randn((5, 5)) for _ in range(6)]
+    model = nnx.Linear(2, 3, rngs=nnx.Rngs(0))
+    params = nnx.state(model)
     max_norm = 1e-2
+    lr = 1e-3
 
-    t1 = tuple(torch.nn.Parameter(torch.clone(t)) for t in tensors)
-    # Test freezing one parameter.
-    t1[-1].requires_grad_(False)
+    optimizer = nnx.Optimizer(model, optax.chain(optax.clip_by_global_norm(max_norm), optax.sgd(lr)), wrt=nnx.Param)
 
-    loss = torch.cat(t1).sum()
-    loss.backward()
-    clip_grad_norm_(t1, max_norm)
-    t1_grads = [torch.clone(t.grad) for t in t1 if t.grad is not None]
+    x = jnp.ones((2, 2))
+    y = jnp.ones((2, 3))
+    loss, grad_state = nnx.value_and_grad(lambda model: ((model(x) - y) ** 2).mean())(model)
 
-    t1_c = tuple(torch.nn.Parameter(torch.clone(t)) for t in tensors)
-    t1_c[-1].requires_grad_(False)
-    loss_c = torch.cat(t1_c).sum()
-    loss_c.backward()
-    run_gradient_clipping(t1_c, max_norm)
-    t1_c_grads = [torch.clone(t.grad) for t in t1_c if t.grad is not None]
+    clipped_grad_state = run_gradient_clipping(grad_state, max_norm)
+    clipped_params = jax.tree.leaves(jax.tree.map(lambda p, g: p - lr * g, params, clipped_grad_state))
 
-    assert len(t1_grads) == len(t1_c_grads)
+    optimizer.update(model, grad_state)
+    expected_params = jax.tree.leaves(nnx.state(model))
 
-    for t1_grad, t1_c_grad in zip(t1_grads, t1_c_grads):
-        numpy.testing.assert_allclose(
-            t1_grad.detach().numpy(),
-            t1_c_grad.detach().numpy(),
-            atol=1e-6,
-        )
+    for p, expected_p in zip(clipped_params, expected_params):
+        numpy.testing.assert_allclose(p, expected_p, atol=1e-6)

@@ -11,6 +11,9 @@ import flax
 from flax import nnx
 from flax.nnx import State
 import numpy.typing as npt
+from collections.abc import Callable, Iterable
+from typing import Optional
+import math
 
 class Linear(nnx.Module):
     def __init__(self, rngs: nnx.Rngs, in_features: int, out_features: int, dtype: jnp.dtype = jnp.float32):
@@ -303,125 +306,84 @@ class TransformerLM(nnx.Module):
 
 
 def cross_entropy_loss(inputs: Float[Array, " batch_size vocab_size"], targets: Int[Array, " batch_size"]) -> Array:
-    raise NotImplementedError
-    # """Computes Cross-Entropy Loss
-    # """
-    # # Stabilize logits to avoid overflow when exponentiating
-    # max_logits = torch.max(inputs, dim=-1, keepdim=True).values
-    # shifted_logits = inputs - max_logits
+    """Computes Cross-Entropy Loss
+    """
+    # Stabilize logits to avoid overflow when exponentiating
+    max_logits = jnp.max(inputs, axis=-1, keepdims=True)
+    shifted_logits = inputs - max_logits
 
-    # log_sum_exp = torch.log(torch.sum(torch.exp(shifted_logits), dim=-1, keepdim=True)) + max_logits
-    # # NOTE: this is basically log(softmax(inputs)), but reexpressed for numerical stability
-    # log_probs = inputs - log_sum_exp
+    log_sum_exp = jnp.log(jnp.sum(jnp.exp(shifted_logits), axis=-1, keepdims=True)) + max_logits
+    # NOTE: this is basically log(softmax(inputs)), but reexpressed for numerical stability
+    log_probs = inputs - log_sum_exp
 
-    # target_log_probs = log_probs.gather(1, targets.unsqueeze(1)).squeeze(1)
-    # loss = -target_log_probs.mean()
-    # return loss
-
-
-# SGD Example
-from collections.abc import Callable, Iterable
-from typing import Optional
-import math
-class SGD:
-    def __init__(self, params, lr=1e-3):
-        raise NotImplementedError
-        # if lr < 0: 
-        #     raise ValueError(f"Invalid learning rate: {lr}")
-        # defaults = {"lr": lr}
-        # super().__init__(params, defaults)
-    
-    def step(self, closure: Optional[Callable] = None):
-        raise NotImplementedError
-        # loss = None if closure is None else closure()
-        # for group in self.param_groups:
-        #     lr = group["lr"]
-        #     for p in group["params"]:
-        #         if p.grad is None:
-        #             continue
-        #             
-        #         state = self.state[p]
-        #     t = state.get("t", 0)
-        #     grad = p.grad.data
-        #     p.data -= lr / math.sqrt(t + 1) * grad
-        #     state["t"] = t + 1
-        # return loss
+    target_log_probs = jnp.take_along_axis(log_probs, jnp.expand_dims(targets, axis=1), axis=1).squeeze(axis=1)
+    loss = -target_log_probs.mean()
+    return loss
 
 
 class AdamW:
-    def __init__(self, params, lr=1e-3, betas = (0.9, 0.999), weight_decay = 0.01, eps = 1e-8):
-        raise NotImplementedError
-        # if lr < 0:
-        #     raise ValueError("Invalid learning rate: {lr}")
-        # if not 0.0 <= betas[0] < 1.0:
-        #     raise ValueError(f"Invalid beta1 value: {betas[0]}")
-        # if not 0.0 <= betas[1] < 1.0:
-        #     raise ValueError(f"Invalid beta2 value: {betas[1]}")
-        # defaults = {"t": 0, "lr": lr, "beta1": betas[0], "beta2": betas[1], "weight_decay": weight_decay, "eps": eps}
-
-
-        # super().__init__(params, defaults)
+    def __init__(self, lr=1e-3, betas = (0.9, 0.999), weight_decay = 0.01, eps = 1e-8):
+        if lr < 0:
+            raise ValueError("Invalid learning rate: {lr}")
+        if not 0.0 <= betas[0] < 1.0:
+            raise ValueError(f"Invalid beta1 value: {betas[0]}")
+        if not 0.0 <= betas[1] < 1.0:
+            raise ValueError(f"Invalid beta2 value: {betas[1]}")
+        self.lr = lr
+        self.betas = betas
+        self.weight_decay = weight_decay
+        self.eps = eps
+        self.state = None
     
-    def step(self, closure=None):
-        raise NotImplementedError
-        # loss = None if closure is None else closure()
-        # for group in self.param_groups:
-        #     lr = group["lr"]
-        #     beta1 = group["beta1"]
-        #     beta2 = group["beta2"]
-        #     weight_decay = group["weight_decay"]
-        #     eps = group["eps"]
-        #     for p in group["params"]:
-        #         if p.grad is None:
-        #             continue
-        #         state = self.state[p]
-        #         if len(state) == 0:
-        #             state['m'] = torch.zeros_like(p.data)
-        #             state['v'] = torch.zeros_like(p.data)
-        #             state['t'] = 0
-        #         state['t'] += 1
-        #         grad = p.grad.data
-        #         state['m'] = beta1 * state['m'] + (1 - beta1) * grad
-        #         state['v'] = beta2 * state['v'] + (1 - beta2) * grad ** 2
-        #         state['lr'] = lr * (1 - beta2 ** state['t']) ** 0.5 / (1 - beta1 ** state['t'])
-        #         p.data -= state['lr'] * state['m'] / (state['v'] ** 0.5 + eps)
-        #         p.data = p.data * (1 -  lr * weight_decay)
-        # return loss
+    def update(self, model: nnx.Module, grad_state: State):
+        params = nnx.state(model)
+        if self.state is None:
+            self.state = jax.tree.map(lambda p: {
+                'm': jnp.zeros_like(p),
+                'v': jnp.zeros_like(p),
+                't': 0
+            }, params)
+        def update_param(param: nnx.Param, grad: Array, state: dict) -> nnx.Param:
+            state['t'] += 1
+            state['m'] = self.betas[0] * state['m'] + (1 - self.betas[0]) * grad
+            state['v'] = self.betas[1] * state['v'] + (1 - self.betas[1]) * grad ** 2
+            state['lr'] = self.lr * (1 - self.betas[1] ** state['t']) ** 0.5 / (1 - self.betas[0] ** state['t'])
+            param = param - state['lr'] * state['m'] / (state['v'] ** 0.5 + self.eps)
+            param = param * (1 -  self.lr * self.weight_decay)
+            return param
+        params = jax.tree.map(update_param, params, grad_state, self.state)
+        nnx.update(model, params)
 
 
 def get_lr_schedule(t, a_max, a_min, warmup_iters, cosine_annealing_iters):
-    raise NotImplementedError
-    # if t < warmup_iters:
-    #     return t / warmup_iters * a_max
-    # elif t <= cosine_annealing_iters:
-    #     return a_min + (1 + math.cos((t - warmup_iters) / (cosine_annealing_iters - warmup_iters) * math.pi)) / 2 * (a_max - a_min)
-    # else:
-    #     return a_min
+    if t < warmup_iters:
+        return t / warmup_iters * a_max
+    elif t <= cosine_annealing_iters:
+        return a_min + (1 + math.cos((t - warmup_iters) / (cosine_annealing_iters - warmup_iters) * math.pi)) / 2 * (a_max - a_min)
+    else:
+        return a_min
     
 
-def gradient_clipping(parameters: Iterable, max_l2_norm: float, eps = 1e-6) -> None:
-    raise NotImplementedError
-    # total_norm = torch.norm(torch.stack([p.grad.data for p in parameters if p.grad is not None]), p=2)
-    # if total_norm > max_l2_norm:
-    #     for p in parameters:
-    #         if p.grad is None:
-    #             continue
-    #         p.grad.data = p.grad.data * (max_l2_norm / (total_norm + eps))
+def gradient_clipping(gradient_state: State, max_l2_norm: float, eps = 1e-6) -> State:
+    gradients = jax.tree.leaves(gradient_state)
+    total_norm = jnp.linalg.norm(jnp.concatenate([g.reshape(-1) for g in gradients]), ord=2)
+    if total_norm > max_l2_norm:
+        return jax.tree.map(lambda g: g * (max_l2_norm / (total_norm + eps)), gradient_state)
+    return gradient_state
 
 
 def get_batch(dataset: npt.NDArray, batch_size: int, context_length: int, device: str) -> tuple[Array, Array]:
-    raise NotImplementedError
-    # start_indices = torch.randint(0, len(dataset) - context_length, (batch_size,))
-    # batch = []
-    # for start in start_indices: 
-    #     batch_item = torch.tensor(dataset[start : start+context_length + 1])
-    #     batch.append(batch_item)
-    # batch = torch.stack(batch, dim=0).to(device)
-    # # B, S + 1
-    # train_batch = batch[:, :-1]
-    # target_batch = batch[:, 1:]
-    # assert train_batch.shape == target_batch.shape
-    # return (train_batch, target_batch)
+    start_indices = torch.randint(0, len(dataset) - context_length, (batch_size,))
+    batch = []
+    for start in start_indices: 
+        batch_item = torch.tensor(dataset[start : start+context_length + 1])
+        batch.append(batch_item)
+    batch = torch.stack(batch, dim=0).to(device)
+    # B, S + 1
+    train_batch = batch[:, :-1]
+    target_batch = batch[:, 1:]
+    assert train_batch.shape == target_batch.shape
+    return (train_batch, target_batch)
 
 
 def save_checkpoint(

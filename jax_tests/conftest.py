@@ -46,6 +46,20 @@ def tensor_to_array(x: Tensor | dict | list) -> Array | dict | list:
         return x
 
 
+def array_to_tensor(x: Array | dict | list) -> Tensor | dict | list:
+    """
+    Recursively converts JAX arrays to PyTorch tensors.
+    """
+    if isinstance(x, Array):
+        return torch.tensor(jax.device_get(x))
+    elif isinstance(x, dict):
+        return {k: array_to_tensor(v) for k, v in x.items()}
+    elif isinstance(x, list):
+        return [array_to_tensor(v) for v in x]
+    else:
+        return x
+
+
 class NumpySnapshot:
     """Snapshot testing utility for NumPy arrays using .npz format."""
 

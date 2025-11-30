@@ -553,16 +553,17 @@ def run_cross_entropy(
     return model.cross_entropy_loss(inputs, targets)
 
 
-def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
-    """Given a set of parameters, clip their combined gradients to have l2 norm at most max_l2_norm.
+def run_gradient_clipping(gradient_state: State, max_l2_norm: float) -> State:
+    """Given a gradient state, clip the gradients to have l2 norm at most max_l2_norm.
 
     Args:
-        parameters (Iterable[torch.nn.Parameter]): collection of trainable parameters.
+        gradient_state (State): collection of gradients.
         max_l2_norm (float): a positive value containing the maximum l2-norm.
 
-    The gradients of the parameters (parameter.grad) should be modified in-place.
+    Returns:
+        State: the clipped gradient state.
     """
-    model.gradient_clipping(parameters, max_l2_norm)
+    return model.gradient_clipping(gradient_state, max_l2_norm)
 
 
 def get_adamw_cls() -> Any:
