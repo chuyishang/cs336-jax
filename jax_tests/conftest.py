@@ -26,6 +26,26 @@ def _canonicalize_array(arr: _A) -> np.ndarray:
     return arr
 
 
+def tensor_to_array(x: Tensor | dict | list) -> Array | dict | list:
+    """
+    Recursively converts PyTorch tensors to JAX arrays.
+    
+    Works on:
+    - torch.Tensor -> jax.Array
+    - dict -> dict with converted values
+    - list -> list with converted elements
+    - Other types are passed through unchanged
+    """
+    if isinstance(x, torch.Tensor):
+        return jnp.array(x.detach().cpu().numpy())
+    elif isinstance(x, dict):
+        return {k: tensor_to_array(v) for k, v in x.items()}
+    elif isinstance(x, list):
+        return [tensor_to_array(v) for v in x]
+    else:
+        return x
+
+
 class NumpySnapshot:
     """Snapshot testing utility for NumPy arrays using .npz format."""
 
@@ -202,7 +222,7 @@ def ts_state_dict(request):
 
     state_dict = torch.load(FIXTURES_PATH / "ts_tests" / "model.pt", map_location="cpu")
     config = json.load(open(FIXTURES_PATH / "ts_tests" / "model_config.json"))
-    state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+    state_dict = tensor_to_array({k.replace("_orig_mod.", ""): v for k, v in state_dict.items()})
     return state_dict, config
 
 
@@ -257,37 +277,37 @@ def d_ff():
 @pytest.fixture
 def q(batch_size, n_queries, d_model):
     torch.manual_seed(1)
-    return torch.randn(batch_size, n_queries, d_model)
+    return tensor_to_array(torch.randn(batch_size, n_queries, d_model))
 
 
 @pytest.fixture
 def k(batch_size, n_keys, d_model):
     torch.manual_seed(2)
-    return torch.randn(batch_size, n_keys, d_model)
+    return tensor_to_array(torch.randn(batch_size, n_keys, d_model))
 
 
 @pytest.fixture
 def v(batch_size, n_keys, d_model):
     torch.manual_seed(3)
-    return torch.randn(batch_size, n_keys, d_model)
+    return tensor_to_array(torch.randn(batch_size, n_keys, d_model))
 
 
 @pytest.fixture
 def in_embeddings(batch_size, n_queries, d_model):
     torch.manual_seed(4)
-    return torch.randn(batch_size, n_queries, d_model)
+    return tensor_to_array(torch.randn(batch_size, n_queries, d_model))
 
 
 @pytest.fixture
 def mask(batch_size, n_queries, n_keys):
     torch.manual_seed(5)
-    return torch.randn(batch_size, n_queries, n_keys) > 0.5
+    return tensor_to_array(torch.randn(batch_size, n_queries, n_keys) > 0.5)
 
 
 @pytest.fixture
 def in_indices(batch_size, n_queries):
     torch.manual_seed(6)
-    return torch.randint(0, 10_000, (batch_size, n_queries))
+    return tensor_to_array(torch.randint(0, 10_000, (batch_size, n_queries)))
 
 
 @pytest.fixture
@@ -297,7 +317,7 @@ def theta():
 
 @pytest.fixture
 def pos_ids(n_queries):
-    return torch.arange(0, n_queries)
+    return tensor_to_array(torch.arange(0, n_queries))
 
 
 # # Example usage:

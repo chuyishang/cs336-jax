@@ -15,13 +15,14 @@ from cs336_jax_basics import train_bpe
 from cs336_jax_basics import tokenizer
 from cs336_jax_basics import model
 
-from .common import create_linear_layer_state, create_embedding_state, tensor_to_array
+from .common import create_linear_layer_state, create_embedding_state, create_rmsnorm_state, create_swiglu_state, create_mha_state
+from .conftest import tensor_to_array
 
 def run_linear(
     d_in: int,
     d_out: int,
-    weights: Float[Tensor, " d_out d_in"],
-    in_features: Float[Tensor, " ... d_in"],
+    weights: Float[Array, " d_out d_in"],
+    in_features: Float[Array, " ... d_in"],
 ) -> Float[Array, " ... d_out"]:
     """
     Given the weights of a Linear layer, compute the transformation of a batched input.
@@ -35,10 +36,7 @@ def run_linear(
     Returns:
         Float[Array, "... d_out"]: The transformed output of your linear module.
     """
-    weights = tensor_to_array(weights)
-    in_features = tensor_to_array(in_features)
-
-    linear_layer = model.Linear(d_in, d_out, rngs=nnx.Rngs(0))
+    linear_layer = model.Linear(rngs=nnx.Rngs(0), in_features=d_in, out_features=d_out)
     linear_layer_state = create_linear_layer_state(weights)
     nnx.update(linear_layer, linear_layer_state)
     return linear_layer(in_features)
@@ -47,8 +45,8 @@ def run_linear(
 def run_embedding(
     vocab_size: int,
     d_model: int,
-    weights: Float[Tensor, " vocab_size d_model"],
-    token_ids: Int[Tensor, " ..."],
+    weights: Float[Array, " vocab_size d_model"],
+    token_ids: Int[Array, " ..."],
 ) -> Float[Array, " ... d_model"]:
     """
     Given the weights of an Embedding layer, get the embeddings for a batch of token ids.
@@ -56,16 +54,13 @@ def run_embedding(
     Args:
         vocab_size (int): The number of embeddings in the vocabulary
         d_model (int): The size of the embedding dimension
-        weights (Float[Tensor, "vocab_size d_model"]): The embedding vectors to fetch from
-        token_ids (Int[Tensor, "..."]): The set of token ids to fetch from the Embedding layer
+        weights (Float[Array, "vocab_size d_model"]): The embedding vectors to fetch from
+        token_ids (Int[Array, "..."]): The set of token ids to fetch from the Embedding layer
 
     Returns:
         Float[Array, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-    weights = tensor_to_array(weights)
-    token_ids = tensor_to_array(token_ids)
-    
-    embedding = model.Embedding(vocab_size, d_model)
+    embedding = model.Embedding(rngs=nnx.Rngs(0), num_embeddings=vocab_size, embedding_dim=d_model)
     embedding_state = create_embedding_state(weights)
     nnx.update(embedding, embedding_state)
     return embedding(token_ids)
@@ -75,10 +70,10 @@ def run_embedding(
 def run_swiglu(
     d_model: int,
     d_ff: int,
-    w1_weight: Float[Tensor, " d_ff d_model"],
-    w2_weight: Float[Tensor, " d_model d_ff"],
-    w3_weight: Float[Tensor, " d_ff d_model"],
-    in_features: Float[Tensor, " ... d_model"],
+    w1_weight: Float[Array, " d_ff d_model"],
+    w2_weight: Float[Array, " d_model d_ff"],
+    w3_weight: Float[Array, " d_ff d_model"],
+    in_features: Float[Array, " ... d_model"],
 ) -> Float[Array, " ... d_model"]:
     """Given the weights of a SwiGLU network, return
     the output of your implementation with these weights.
@@ -86,10 +81,10 @@ def run_swiglu(
     Args:
         d_model (int): Dimensionality of the feedforward input and output.
         d_ff (int): Dimensionality of the up-project happening internally to your swiglu.
-        w1_weight (Float[Tensor, "d_ff d_model"]): Stored weights for W1
-        w2_weight (Float[Tensor, "d_model d_ff"]): Stored weights for W2
-        w3_weight (Float[Tensor, "d_ff d_model"]): Stored weights for W3
-        in_features (Float[Tensor, "... d_model"]): Input embeddings to the feed-forward layer.
+        w1_weight (Float[Array, "d_ff d_model"]): Stored weights for W1
+        w2_weight (Float[Array, "d_model d_ff"]): Stored weights for W2
+        w3_weight (Float[Array, "d_ff d_model"]): Stored weights for W3
+        in_features (Float[Array, "... d_model"]): Input embeddings to the feed-forward layer.
 
     Returns:
         Float[Array, "... d_model"]: Output embeddings of the same shape as the input embeddings.
@@ -101,19 +96,8 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    w1_weight = tensor_to_array(w1_weight)
-    w2_weight = tensor_to_array(w2_weight)
-    w3_weight = tensor_to_array(w3_weight)
-    in_features = tensor_to_array(in_features)
-    
-    swiglu = model.SwiGLU(d_model, d_ff)
-    swiglu_state = State(
-        {
-            'w1': create_linear_layer_state(w1_weight),
-            'w2': create_linear_layer_state(w2_weight),
-            'w3': create_linear_layer_state(w3_weight),
-        }
-    )
+    swiglu = model.SwiGLU(rngs=nnx.Rngs(0), d_model=d_model, d_ff=d_ff)
+    swiglu_state = create_swiglu_state(w1_weight, w2_weight, w3_weight)
     nnx.update(swiglu, swiglu_state)
     # swiglu.w1.weights.data = w1_weight
     # swiglu.w2.weights.data = w2_weight
@@ -123,39 +107,34 @@ def run_swiglu(
 
 
 def run_scaled_dot_product_attention(
-    Q: Float[Tensor, " ... queries d_k"],
-    K: Float[Tensor, " ... keys d_k"],
-    V: Float[Tensor, " ... values d_v"],
-    mask: Float[Tensor, " ... queries keys"] | None = None,
+    Q: Float[Array, " ... queries d_k"],
+    K: Float[Array, " ... keys d_k"],
+    V: Float[Array, " ... values d_v"],
+    mask: Float[Array, " ... queries keys"] | None = None,
 ) -> Float[Array, " ... queries d_v"]:
     """
     Given key (K), query (Q), and value (V) tensors, return
     the output of your scaled dot product attention implementation.
 
     Args:
-        Q (Float[Tensor, " ... queries d_k"]): Query tensor
-        K (Float[Tensor, " ... keys d_k"]): Key tensor
-        V (Float[Tensor, " ... values d_v"]): Values tensor
-        mask (Float[Tensor, " ... queries keys"] | None): Mask tensor
+        Q (Float[Array, " ... queries d_k"]): Query tensor
+        K (Float[Array, " ... keys d_k"]): Key tensor
+        V (Float[Array, " ... values d_v"]): Values tensor
+        mask (Float[Array, " ... queries keys"] | None): Mask tensor
     Returns:
         Float[Array, " ... queries d_v"]: Output of SDPA
     """
-    Q = tensor_to_array(Q)
-    K = tensor_to_array(K)
-    V = tensor_to_array(V)
-    mask = tensor_to_array(mask)
-
     return model.sdpa(Q, K, V, mask)
 
 
 def run_multihead_self_attention(
     d_model: int,
     num_heads: int,
-    q_proj_weight: Float[Tensor, " d_k d_in"],
-    k_proj_weight: Float[Tensor, " d_k d_in"],
-    v_proj_weight: Float[Tensor, " d_v d_in"],
-    o_proj_weight: Float[Tensor, " d_model d_v"],
-    in_features: Float[Tensor, " ... sequence_length d_in"],
+    q_proj_weight: Float[Array, " d_k d_in"],
+    k_proj_weight: Float[Array, " d_k d_in"],
+    v_proj_weight: Float[Array, " d_v d_in"],
+    o_proj_weight: Float[Array, " d_model d_v"],
+    in_features: Float[Array, " ... sequence_length d_in"],
 ) -> Float[Array, " ... sequence_length d_out"]:
     """
     Given the key, query, and value projection weights of a naive unbatched
@@ -169,31 +148,18 @@ def run_multihead_self_attention(
         d_model (int): Dimensionality of the feedforward input and output.
         num_heads (int): Number of heads to use in multi-headed attention.
         max_seq_len (int): Maximum sequence length to pre-cache if your implementation does that.
-        q_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the Q projection
-        k_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the K projection
-        v_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the V projection
-        o_proj_weight (Float[Tensor, "d_model d_v"]): Weights for the output projection
-        in_features (Float[Tensor, "... sequence_length d_in"]): Tensor to run your implementation on.
+        q_proj_weight (Float[Array, "d_k d_in"]): Weights for the Q projection
+        k_proj_weight (Float[Array, "d_k d_in"]): Weights for the K projection
+        v_proj_weight (Float[Array, "d_k d_in"]): Weights for the V projection
+        o_proj_weight (Float[Array, "d_model d_v"]): Weights for the output projection
+        in_features (Float[Array, "... sequence_length d_in"]): Tensor to run your implementation on.
 
     Returns:
         Float[Array, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    q_proj_weight = tensor_to_array(q_proj_weight)
-    k_proj_weight = tensor_to_array(k_proj_weight)
-    v_proj_weight = tensor_to_array(v_proj_weight)
-    o_proj_weight = tensor_to_array(o_proj_weight)
-    in_features = tensor_to_array(in_features)
-    
-    MHA = model.MultiHeadSelfAttention(d_model, num_heads)
-    MHA_state = State(
-        {
-            'Q_proj': create_linear_layer_state(q_proj_weight),
-            'K_proj': create_linear_layer_state(k_proj_weight),
-            'V_proj': create_linear_layer_state(v_proj_weight),
-            'O_proj': create_linear_layer_state(o_proj_weight),
-        }
-    )
+    MHA = model.MultiHeadSelfAttention(rngs=nnx.Rngs(0), d_model=d_model, num_heads=num_heads)
+    MHA_state = create_mha_state(q_proj_weight, k_proj_weight, v_proj_weight, o_proj_weight)
     nnx.update(MHA, MHA_state)
     out = MHA(in_features, use_rope=False)
     return out
@@ -205,12 +171,12 @@ def run_multihead_self_attention_with_rope(
     num_heads: int,
     max_seq_len: int,
     theta: float,
-    q_proj_weight: Float[Tensor, " d_k d_in"],
-    k_proj_weight: Float[Tensor, " d_k d_in"],
-    v_proj_weight: Float[Tensor, " d_v d_in"],
-    o_proj_weight: Float[Tensor, " d_model d_v"],
-    in_features: Float[Tensor, " ... sequence_length d_in"],
-    token_positions: Int[Tensor, " ... sequence_length"] | None = None,
+    q_proj_weight: Float[Array, " d_k d_in"],
+    k_proj_weight: Float[Array, " d_k d_in"],
+    v_proj_weight: Float[Array, " d_v d_in"],
+    o_proj_weight: Float[Array, " d_model d_v"],
+    in_features: Float[Array, " ... sequence_length d_in"],
+    token_positions: Int[Array, " ... sequence_length"] | None = None,
 ) -> Float[Array, " ... sequence_length d_out"]:
     """
     Given the key, query, and value projection weights of a naive unbatched
@@ -226,33 +192,19 @@ def run_multihead_self_attention_with_rope(
         num_heads (int): Number of heads to use in multi-headed attention.
         max_seq_len (int): Maximum sequence length to pre-cache if your implementation does that.
         theta (float): RoPE parameter.
-        q_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the Q projection
-        k_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the K projection
-        v_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the V projection
-        o_proj_weight (Float[Tensor, "d_model d_v"]): Weights for the output projection
-        in_features (Float[Tensor, "... sequence_length d_in"]): Tensor to run your implementation on.
-        token_positions (Int[Tensor, " ... sequence_length"] | None): Optional tensor with the positions of the tokens
+        q_proj_weight (Float[Array, "d_k d_in"]): Weights for the Q projection
+        k_proj_weight (Float[Array, "d_k d_in"]): Weights for the K projection
+        v_proj_weight (Float[Array, "d_k d_in"]): Weights for the V projection
+        o_proj_weight (Float[Array, "d_model d_v"]): Weights for the output projection
+        in_features (Float[Array, "... sequence_length d_in"]): Tensor to run your implementation on.
+        token_positions (Int[Array, " ... sequence_length"] | None): Optional tensor with the positions of the tokens
 
     Returns:
         Float[Array, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    q_proj_weight = tensor_to_array(q_proj_weight)
-    k_proj_weight = tensor_to_array(k_proj_weight)
-    v_proj_weight = tensor_to_array(v_proj_weight)
-    o_proj_weight = tensor_to_array(o_proj_weight)
-    in_features = tensor_to_array(in_features)
-    token_positions = tensor_to_array(token_positions)
-    
-    MHA = model.MultiHeadSelfAttention(d_model, num_heads, rope_theta=theta, max_seq_len=max_seq_len)
-    MHA_state = State(
-        {
-            'Q_proj': create_linear_layer_state(q_proj_weight),
-            'K_proj': create_linear_layer_state(k_proj_weight),
-            'V_proj': create_linear_layer_state(v_proj_weight),
-            'O_proj': create_linear_layer_state(o_proj_weight),
-        }
-    )
+    MHA = model.MultiHeadSelfAttention(rngs=nnx.Rngs(0), d_model=d_model, num_heads=num_heads, rope_theta=theta, max_seq_len=max_seq_len)
+    MHA_state = create_mha_state(q_proj_weight, k_proj_weight, v_proj_weight, o_proj_weight)
     nnx.update(MHA, MHA_state)
     out = MHA(in_features, use_rope=True)
     return out
@@ -262,8 +214,8 @@ def run_rope(
     d_k: int,
     theta: float,
     max_seq_len: int,
-    in_query_or_key: Float[Tensor, " ... sequence_length d_k"],
-    token_positions: Int[Tensor, " ... sequence_length"],
+    in_query_or_key: Float[Array, " ... sequence_length d_k"],
+    token_positions: Int[Array, " ... sequence_length"],
 ) -> Float[Array, " ... sequence_length d_k"]:
     """
     Run RoPE for a given input tensor.
@@ -272,14 +224,11 @@ def run_rope(
         d_k (int): Embedding dimension size for the query or key tensor.
         theta (float): RoPE parameter.
         max_seq_len (int): Maximum sequence length to pre-cache if your implementation does that.
-        in_query_or_key (Float[Tensor, "... sequence_length d_k"]): Input tensor to run RoPE on.
-        token_positions (Int[Tensor, "... sequence_length"]): Tensor of shape (batch_size, sequence_length) with the token positions
+        in_query_or_key (Float[Array, "... sequence_length d_k"]): Input tensor to run RoPE on.
+        token_positions (Int[Array, "... sequence_length"]): Tensor of shape (batch_size, sequence_length) with the token positions
     Returns:
         Float[Array, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    in_query_or_key = tensor_to_array(in_query_or_key)
-    token_positions = tensor_to_array(token_positions)
-    
     rope = model.RotaryPositionalEmbedding(d_k, theta, max_seq_len)
     result = rope(in_query_or_key, token_positions)
     return result
@@ -291,8 +240,8 @@ def run_transformer_block(
     d_ff: int,
     max_seq_len: int,
     theta: float,
-    weights: dict[str, Tensor],
-    in_features: Float[Tensor, " batch sequence_length d_model"],
+    weights: dict[str, Array],
+    in_features: Float[Array, " batch sequence_length d_model"],
 ) -> Float[Array, " batch sequence_length d_model"]:
     """
     Given the weights of a pre-norm Transformer block and input features,
@@ -310,7 +259,7 @@ def run_transformer_block(
         d_ff (int): Dimensionality of the feed-forward inner layer.
         max_seq_len (int): Maximum sequence length to pre-cache if your implementation does that.
         theta (float): RoPE parameter.
-        weights (dict[str, Tensor]):
+        weights (dict[str, Array]):
             State dict of our reference implementation.
             The keys of this dictionary are:
             - `attn.q_proj.weight`
@@ -348,32 +297,21 @@ def run_transformer_block(
                 Weights of affine transform for the second RMSNorm
                 applied in the transformer block.
                 Shape is (d_model,).
-        in_features (Float[Tensor, "batch sequence_length d_model"]):
+        in_features (Float[Array, "batch sequence_length d_model"]):
             Tensor to run your implementation on.
 
     Returns:
         Float[Array, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    weights = tensor_to_array(weights)
-    in_features = tensor_to_array(in_features)
-    
-    TransformerBlock = model.TransformerBlock(d_model, num_heads, d_ff, max_seq_len, theta)
+    TransformerBlock = model.TransformerBlock(rngs=nnx.Rngs(0), d_model=d_model, num_heads=num_heads, d_ff=d_ff, max_seq_len=max_seq_len, theta=theta)
+    print(nnx.to_pure_dict(nnx.state(TransformerBlock)).keys())
     TransformerBlock_state = State(
         {
-            'MHA': {
-                'Q_proj': create_linear_layer_state(weights['attn.q_proj.weight']),
-                'K_proj': create_linear_layer_state(weights['attn.k_proj.weight']),
-                'V_proj': create_linear_layer_state(weights['attn.v_proj.weight']),
-                'O_proj': create_linear_layer_state(weights['attn.output_proj.weight']),
-            },
-            'SwiGLU': {
-                'w1': create_linear_layer_state(weights['ffn.w1.weight']),
-                'w2': create_linear_layer_state(weights['ffn.w2.weight']),
-                'w3': create_linear_layer_state(weights['ffn.w3.weight']),
-            },
-            'RMSNorm1': create_linear_layer_state(weights['ln1.weight']),
-            'RMSNorm2': create_linear_layer_state(weights['ln2.weight']),
+            'MHA': create_mha_state(weights['attn.q_proj.weight'], weights['attn.k_proj.weight'], weights['attn.v_proj.weight'], weights['attn.output_proj.weight']),
+            'SwiGLU': create_swiglu_state(weights['ffn.w1.weight'], weights['ffn.w2.weight'], weights['ffn.w3.weight']),
+            'RMSNorm1': create_rmsnorm_state(weights['ln1.weight']),
+            'RMSNorm2': create_rmsnorm_state(weights['ln2.weight']),
         })
     nnx.update(TransformerBlock, TransformerBlock_state)
 
@@ -389,8 +327,8 @@ def run_transformer_lm(
     num_heads: int,
     d_ff: int,
     rope_theta: float,
-    weights: dict[str, Tensor],
-    in_indices: Int[Tensor, " batch_size sequence_length"],
+    weights: dict[str, Array],
+    in_indices: Int[Array, " batch_size sequence_length"],
 ) -> Float[Array, " batch_size sequence_length vocab_size"]:
     """Given the weights of a Transformer language model and input indices,
     return the output of running a forward pass on the input indices.
@@ -406,7 +344,7 @@ def run_transformer_lm(
             evenly divisible by `num_heads`.
         d_ff (int): Dimensionality of the feed-forward inner layer (section 3.3).
         rope_theta (float): The RoPE $\Theta$ parameter.
-        weights (dict[str, Tensor]):
+        weights (dict[str, Array]):
             State dict of our reference implementation. {num_layers} refers to an
             integer between `0` and `num_layers - 1` (the layer index).
             The keys of this dictionary are:
@@ -453,7 +391,7 @@ def run_transformer_lm(
             - `lm_head.weight`
                 Weights of the language model output embedding.
                 Shape is (vocab_size, d_model).
-        in_indices (Int[Tensor, "batch_size sequence_length"]) Tensor with input indices to run the language model on. Shape is (batch_size, sequence_length), where
+        in_indices (Int[Array, "batch_size sequence_length"]) Tensor with input indices to run the language model on. Shape is (batch_size, sequence_length), where
             `sequence_length` is at most `context_length`.
 
     Returns:
@@ -462,6 +400,7 @@ def run_transformer_lm(
     """
     # Create the TransformerLM model
     transformer_lm = model.TransformerLM(
+        rngs=nnx.Rngs(0),
         d_model=d_model,
         num_heads=num_heads, 
         d_ff=d_ff,
@@ -475,32 +414,42 @@ def run_transformer_lm(
     state_dict = {}
     
     # Token embeddings
-    state_dict['token_embeddings.weights'] = weights['token_embeddings.weight']
+    state_dict['token_embeddings'] = create_embedding_state(weights['token_embeddings.weight'])
     
     # Transformer layers
     for layer_idx in range(num_layers):
         layer_prefix = f'layers.{layer_idx}'
+        if "layers" not in state_dict:
+            state_dict['layers'] = {}
+        if layer_idx not in state_dict['layers']:
+            state_dict['layers'][layer_idx] = {}
+        
+        layer_state_dict = state_dict['layers'][layer_idx]
+
         # Attention weights
-        state_dict[f'layers.{layer_idx}.MHA.Q_proj.weights'] = weights[f'{layer_prefix}.attn.q_proj.weight']
-        state_dict[f'layers.{layer_idx}.MHA.K_proj.weights'] = weights[f'{layer_prefix}.attn.k_proj.weight']
-        state_dict[f'layers.{layer_idx}.MHA.V_proj.weights'] = weights[f'{layer_prefix}.attn.v_proj.weight']
-        state_dict[f'layers.{layer_idx}.MHA.O_proj.weights'] = weights[f'{layer_prefix}.attn.output_proj.weight']
-        
+        layer_state_dict['MHA'] = (
+            create_mha_state(weights[f'{layer_prefix}.attn.q_proj.weight'], weights[f'{layer_prefix}.attn.k_proj.weight'], weights[f'{layer_prefix}.attn.v_proj.weight'], weights[f'{layer_prefix}.attn.output_proj.weight'])
+        )
+
         # FFN weights
-        state_dict[f'layers.{layer_idx}.SwiGLU.w1.weights'] = weights[f'{layer_prefix}.ffn.w1.weight']
-        state_dict[f'layers.{layer_idx}.SwiGLU.w2.weights'] = weights[f'{layer_prefix}.ffn.w2.weight']
-        state_dict[f'layers.{layer_idx}.SwiGLU.w3.weights'] = weights[f'{layer_prefix}.ffn.w3.weight']
-        
+        layer_state_dict['SwiGLU'] = (
+            create_swiglu_state(weights[f'{layer_prefix}.ffn.w1.weight'], weights[f'{layer_prefix}.ffn.w2.weight'], weights[f'{layer_prefix}.ffn.w3.weight'])
+        )
+
         # Norm weights
-        state_dict[f'layers.{layer_idx}.RMSNorm1.weights'] = weights[f'{layer_prefix}.ln1.weight']
-        state_dict[f'layers.{layer_idx}.RMSNorm2.weights'] = weights[f'{layer_prefix}.ln2.weight']
+        layer_state_dict['RMSNorm1'] = (
+            create_rmsnorm_state(weights[f'{layer_prefix}.ln1.weight'])
+        )
+        layer_state_dict['RMSNorm2'] = (
+            create_rmsnorm_state(weights[f'{layer_prefix}.ln2.weight'])
+        )
     
     # Final layer norm and output projection
-    state_dict['ln1.weights'] = weights['ln_final.weight']
-    state_dict['linear.weights'] = weights['lm_head.weight']
+    state_dict['ln1'] = create_rmsnorm_state(weights['ln_final.weight'])
+    state_dict['linear'] = create_linear_layer_state(weights['lm_head.weight'])
     
     # Load the state dict
-    transformer_lm.load_state_dict(state_dict)
+    nnx.update(transformer_lm, state_dict)
     
     # Run forward pass
     return transformer_lm(in_indices)
@@ -509,8 +458,8 @@ def run_transformer_lm(
 def run_rmsnorm(
     d_model: int,
     eps: float,
-    weights: Float[Tensor, " d_model"],
-    in_features: Float[Tensor, " ... d_model"],
+    weights: Float[Array, " d_model"],
+    in_features: Float[Array, " ... d_model"],
 ) -> Float[Array, " ... d_model"]:
     """Given the weights of a RMSNorm affine transform,
     return the output of running RMSNorm on the input features.
@@ -526,18 +475,13 @@ def run_rmsnorm(
         Float[Array,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    weights = tensor_to_array(weights)
-    in_features = tensor_to_array(in_features)
-
-    rms_norm = model.RMSNorm(d_model, eps)
-    rms_norm_state = State({
-        'weights': nnx.Param(weights)
-        })
+    rms_norm = model.RMSNorm(rngs=nnx.Rngs(0), d_model=d_model, eps=eps)
+    rms_norm_state = create_rmsnorm_state(weights)
     nnx.update(rms_norm, rms_norm_state)
     return rms_norm(in_features)  
 
 
-def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Array, " ..."]:
+def run_silu(in_features: Float[Array, " ..."]) -> Float[Array, " ..."]:
     """Given a tensor of inputs, return the output of applying SiLU
     to each element.
 
@@ -574,7 +518,7 @@ def run_get_batch(
     return model.get_batch(dataset, batch_size, context_length, device)
 
 
-def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Array, " ..."]:
+def run_softmax(in_features: Float[Array, " ..."], dim: int) -> Float[Array, " ..."]:
     """
     Given a tensor of inputs, return the output of softmaxing the given `dim`
     of the input.
@@ -592,15 +536,15 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Array, " 
 
 
 def run_cross_entropy(
-    inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]
+    inputs: Float[Array, " batch_size vocab_size"], targets: Int[Array, " batch_size"]
 ) -> Float[Array, ""]:
     """Given a tensor of inputs and targets, compute the average cross-entropy
     loss across examples.
 
     Args:
-        inputs (Float[Tensor, "batch_size vocab_size"]): inputs[i][j] is the
+        inputs (Float[Array, "batch_size vocab_size"]): inputs[i][j] is the
             unnormalized logit of jth class for the ith example.
-        targets (Int[Tensor, "batch_size"]): Tensor of shape (batch_size,) with the index of the correct class.
+        targets (Int[Array, "batch_size"]): Tensor of shape (batch_size,) with the index of the correct class.
             Each value must be between 0 and `num_classes - 1`.
 
     Returns:

@@ -2,6 +2,7 @@ from einops import rearrange
 import numpy
 import torch
 import torch.nn.functional as F
+import jax
 
 from .adapters import (
     run_multihead_self_attention_with_rope,
@@ -16,6 +17,8 @@ from .adapters import (
     run_linear,
     run_embedding,
 )
+
+from .conftest import tensor_to_array
 
 
 def test_linear(numpy_snapshot, ts_state_dict, in_embeddings, d_model, d_ff):
@@ -198,5 +201,5 @@ def test_silu_matches_pytorch():
         ]
     )
     expected_output = F.silu(x)
-    actual_output = run_silu(x)
-    numpy.testing.assert_allclose(actual_output.detach().numpy(), expected_output.detach().numpy(), atol=1e-6)
+    actual_output = run_silu(tensor_to_array(x))
+    numpy.testing.assert_allclose(jax.device_get(actual_output), expected_output.detach().numpy(), atol=1e-6)

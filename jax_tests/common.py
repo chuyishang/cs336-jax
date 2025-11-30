@@ -75,21 +75,28 @@ def create_embedding_state(weights: Float[Array, " vocab_size d_model"]) -> Stat
         }
     )
 
-def tensor_to_array(x: Tensor | dict | list) -> Array | dict | list:
-    """
-    Recursively converts PyTorch tensors to JAX arrays.
-    
-    Works on:
-    - torch.Tensor -> jax.Array
-    - dict -> dict with converted values
-    - list -> list with converted elements
-    - Other types are passed through unchanged
-    """
-    if isinstance(x, torch.Tensor):
-        return jnp.array(x.detach().cpu().numpy())
-    elif isinstance(x, dict):
-        return {k: tensor_to_array(v) for k, v in x.items()}
-    elif isinstance(x, list):
-        return [tensor_to_array(v) for v in x]
-    else:
-        return x
+def create_rmsnorm_state(weights: Float[Array, " d_model"]) -> State:
+    return State(
+        {
+            'weights': nnx.Param(weights),
+        }
+    )
+
+def create_swiglu_state(w1: Float[Array, " d_model d_ff"], w2: Float[Array, " d_ff d_model"], w3: Float[Array, " d_model d_ff"]) -> State:
+    return State(
+        {
+            'w1': create_linear_layer_state(w1),
+            'w2': create_linear_layer_state(w2),
+            'w3': create_linear_layer_state(w3),
+        }
+    )
+
+def create_mha_state(q_proj_weight: Float[Array, " d_k d_in"], k_proj_weight: Float[Array, " d_k d_in"], v_proj_weight: Float[Array, " d_v d_in"], o_proj_weight: Float[Array, " d_model d_v"]) -> State:
+    return State(
+        {
+            'Q_proj': create_linear_layer_state(q_proj_weight),
+            'K_proj': create_linear_layer_state(k_proj_weight),
+            'V_proj': create_linear_layer_state(v_proj_weight),
+            'O_proj': create_linear_layer_state(o_proj_weight),
+        }
+    )
