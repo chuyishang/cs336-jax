@@ -8,9 +8,11 @@ import numpy as np
 import torch
 import yaml
 import jax
+from jax import Array
 import jax.numpy as jnp
 from flax import nnx
 from flax.nnx import State
+from jaxtyping import Float, Int
 
 from cs336_jax_basics import model as model_module
 
@@ -61,11 +63,11 @@ class MemMapDataset:
 
 
 def get_batch_from_memmap(
+    rngs: nnx.Rngs,
     dataset: MemMapDataset,
     batch_size: int,
     context_length: int,
-    device: str
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[Array, Array]:
     """
     Sample a batch from memory-mapped dataset.
 
@@ -73,27 +75,26 @@ def get_batch_from_memmap(
         dataset: MemMapDataset instance
         batch_size: Number of sequences in batch
         context_length: Length of each sequence
-        device: Device to place tensors on
 
     Returns:
         Tuple of (inputs, targets) tensors
     """
     # Use the model's get_batch function with the memmap data
     return model_module.get_batch(
+        rngs,
         dataset.data,
         batch_size,
         context_length,
-        device
     )
 
 
 @torch.no_grad()
 def estimate_loss(
+    rngs: nnx.Rngs,
     model: nnx.Module,
     train_dataset: MemMapDataset,
     val_dataset: Optional[MemMapDataset],
     config: dict,
-    device: str,
     eval_iters: int
 ) -> dict:
     """
@@ -118,8 +119,9 @@ def estimate_loss(
     train_losses = []
     for _ in range(eval_iters):
         inputs, targets = get_batch_from_memmap(
-            train_dataset, batch_size, context_length, device
+            rngs, train_dataset, batch_size, context_length
         )
+
         logits = model(inputs)
         # Reshape for cross-entropy: (B, S, V) -> (B*S, V) and (B, S) -> (B*S,)
         B, S, V = logits.shape
@@ -135,7 +137,7 @@ def estimate_loss(
         val_losses = []
         for _ in range(eval_iters):
             inputs, targets = get_batch_from_memmap(
-                val_dataset, batch_size, context_length, device
+                rngs, val_dataset, batch_size, context_length
             )
             logits = model(inputs)
             B, S, V = logits.shape
@@ -167,12 +169,8 @@ def train(config_path: str, use_wandb: bool = False, run_name: Optional[str] = N
 
     # Set random seed for reproducibility
     seed = config['training'].get('seed', 42)
-    torch.manual_seed(seed)
+    RNGS = nnx.Rngs(seed)
     np.random.seed(seed)
-
-    # Setup device
-    device = config['training'].get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
 
     # Load datasets with memory mapping
     print("\nLoading datasets...")
@@ -185,7 +183,7 @@ def train(config_path: str, use_wandb: bool = False, run_name: Optional[str] = N
     # Initialize model
     print("\nInitializing model...")
     model = model_module.TransformerLM(
-        rngs=nnx.Rngs(0),
+        rngs=rngs,
         d_model=config['model']['d_model'],
         num_heads=config['model']['num_heads'],
         d_ff=config['model']['d_ff'],
@@ -196,16 +194,15 @@ def train(config_path: str, use_wandb: bool = False, run_name: Optional[str] = N
     )
 
     # Count parameters
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.size for p in jax.tree.leaves(nnx.state(model)) if isinstance(p, Array))
+    # trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Total parameters: {total_params:,}")
-    print(f"Trainable parameters: {trainable_params:,}")
+    # print(f"Trainable parameters: {trainable_params:,}")
 
     # Initialize optimizer
     optimizer_config = config['optimizer']
     if optimizer_config['type'].lower() == 'adamw':
         optimizer = model_module.AdamW(
-            model.parameters(),
             lr=optimizer_config['lr'],
             betas=tuple(optimizer_config['betas']),
             weight_decay=optimizer_config['weight_decay'],
@@ -269,29 +266,19 @@ def train(config_path: str, use_wandb: bool = False, run_name: Optional[str] = N
 
         # Sample batch
         inputs, targets = get_batch_from_memmap(
-            train_dataset, batch_size, context_length, device
+            RNGS, train_dataset, batch_size, context_length
         )
 
-        # Forward pass
-        logits = model(inputs)
+        B, S = targets.shape
 
-        # Compute loss
-        B, S, V = logits.shape
-        loss = model_module.cross_entropy_loss(
-            logits.reshape(B * S, V),
-            targets.reshape(B * S)
-        )
-
-        # Backward pass
-        optimizer.zero_grad()
-        loss.backward()
-
+        # Compute loss and gradients
+        loss, grad_state = nnx.value_and_grad(lambda model: model_module.cross_entropy_loss(model(inputs).reshape(B * S, -1), targets.reshape(B * S)))(model)
         # Gradient clipping
         if gradient_clip > 0:
-            model_module.gradient_clipping(model.parameters(), gradient_clip)
+            grad_state = model_module.gradient_clipping(grad_state, gradient_clip)
 
         # Optimizer step
-        optimizer.step()
+        optimizer.update(model, grad_state)
 
         # Logging
         if iter_num % log_interval == 0:
@@ -316,7 +303,7 @@ def train(config_path: str, use_wandb: bool = False, run_name: Optional[str] = N
 
             eval_iters = config['eval'].get('eval_iters', 100)
             losses = estimate_loss(
-                model, train_dataset, val_dataset, config, device, eval_iters
+                RNGS, model, train_dataset, val_dataset, config, eval_iters
             )
 
             print(f"Train Loss: {losses['train']:.4f}")
@@ -363,7 +350,7 @@ def main():
     parser.add_argument(
         '--config',
         type=str,
-        default='cs336_basics/config.yaml',
+        default='cs336_jax_basics/config.yaml',
         help='Path to YAML configuration file'
     )
     parser.add_argument(
