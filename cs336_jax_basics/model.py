@@ -337,27 +337,31 @@ class AdamW:
         self.state = None
     
     def update(self, model: nnx.Module, grad_state: State):
-        params = nnx.state(model)
+        # Only get parameters (not all state)
+        params = nnx.state(model, nnx.Param)
         if self.state is None:
             self.state = jax.tree.map(lambda p: {
                 'm': jnp.zeros_like(p),
                 'v': jnp.zeros_like(p),
                 't': 0
             }, params)
-        def update_param(param: nnx.Param, grad: Array, state: dict) -> nnx.Param:
+        def update_param(param: Array, grad: Array, state: dict) -> Array:
             state['t'] += 1
             state['m'] = self.betas[0] * state['m'] + (1 - self.betas[0]) * grad
             state['v'] = self.betas[1] * state['v'] + (1 - self.betas[1]) * grad ** 2
             state['lr'] = self.lr * (1 - self.betas[1] ** state['t']) ** 0.5 / (1 - self.betas[0] ** state['t'])
             param = param - state['lr'] * state['m'] / (state['v'] ** 0.5 + self.eps)
-            param = param * (1 -  self.lr * self.weight_decay)
+            param = param * (1 - self.lr * self.weight_decay)
             return param
+
+        # Use tree_map to update only leaves that exist in all three trees
         params = jax.tree.map(update_param, params, grad_state, self.state)
         nnx.update(model, params)
 
 
-def get_lr_schedule(t, a_max, a_min, warmup_iters, cosine_annealing_iters):
+def get_lr_schedule(t: int, a_max: float, a_min: float, warmup_iters: int, cosine_annealing_iters: int) -> float:
     if t < warmup_iters:
+        # breakpoint()
         return t / warmup_iters * a_max
     elif t <= cosine_annealing_iters:
         return a_min + (1 + math.cos((t - warmup_iters) / (cosine_annealing_iters - warmup_iters) * math.pi)) / 2 * (a_max - a_min)
