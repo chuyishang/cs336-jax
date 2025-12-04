@@ -330,10 +330,10 @@ class AdamW:
             raise ValueError(f"Invalid beta1 value: {betas[0]}")
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError(f"Invalid beta2 value: {betas[1]}")
-        self.lr = lr
-        self.betas = betas
-        self.weight_decay = weight_decay
-        self.eps = eps
+        self.lr = float(lr)
+        self.betas = tuple(float(b) for b in betas)
+        self.weight_decay = float(weight_decay)
+        self.eps = float(eps)
         self.state = None
     
     def update(self, model: nnx.Module, grad_state: State):

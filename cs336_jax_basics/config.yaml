@@ -1,10 +1,10 @@
 # Model Architecture
 model:
-  d_model: 512              # Model embedding dimension
-  num_heads: 8              # Number of attention heads (d_model must be divisible by num_heads)
-  d_ff: 2048                # Feed-forward network hidden dimension
-  num_layers: 6             # Number of transformer blocks
-  vocab_size: 50257         # Vocabulary size (GPT-2 default)
+  d_model: 256              # Model embedding dimension
+  num_heads: 4              # Number of attention heads (d_model must be divisible by num_heads)
+  d_ff: 1024                # Feed-forward network hidden dimension
+  num_layers: 2             # Number of transformer blocks
+  vocab_size: 10000         # Vocabulary size (GPT-2 default)
   context_length: 1024      # Maximum sequence length
   theta: 10000.0            # RoPE theta parameter
 
@@ -25,8 +25,8 @@ lr_schedule:
 
 # Training
 training:
-  batch_size: 32            # Training batch size
-  max_iters: 100000         # Maximum number of training iterations
+  batch_size: 4            # Training batch size
+  max_iters: 10000         # Maximum number of training iterations
   eval_interval: 500        # Evaluate every N iterations
   log_interval: 100         # Log metrics every N iterations
   gradient_clip: 1.0        # Maximum gradient L2 norm for clipping
@@ -35,8 +35,8 @@ training:
 
 # Data
 data:
-  train_path: data/train.bin  # Path to training data
-  val_path: data/val.bin      # Path to validation data
+  train_path: ../data/train_partial.bin  # Path to training data
+  val_path: null              # Path to validation data
 
 # Checkpointing
 checkpoint:

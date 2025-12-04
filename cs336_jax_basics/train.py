@@ -169,7 +169,7 @@ def train(config_path: str, use_wandb: bool = False, run_name: Optional[str] = N
 
     # Set random seed for reproducibility
     seed = config['training'].get('seed', 42)
-    RNGS = nnx.Rngs(seed)
+    rngs = nnx.Rngs(seed)
     np.random.seed(seed)
 
     # Load datasets with memory mapping
@@ -203,7 +203,7 @@ def train(config_path: str, use_wandb: bool = False, run_name: Optional[str] = N
     optimizer_config = config['optimizer']
     if optimizer_config['type'].lower() == 'adamw':
         optimizer = model_module.AdamW(
-            lr=optimizer_config['lr'],
+            lr=float(optimizer_config['lr']),
             betas=tuple(optimizer_config['betas']),
             weight_decay=optimizer_config['weight_decay'],
             eps=optimizer_config['eps']
@@ -253,20 +253,23 @@ def train(config_path: str, use_wandb: bool = False, run_name: Optional[str] = N
         if use_lr_schedule:
             lr = model_module.get_lr_schedule(
                 iter_num,
-                lr_schedule_config['max_learning_rate'],
-                lr_schedule_config['min_learning_rate'],
-                lr_schedule_config['warmup_iters'],
-                lr_schedule_config['cosine_cycle_iters']
+                float(lr_schedule_config['max_learning_rate']),
+                float(lr_schedule_config['min_learning_rate']),
+                int(lr_schedule_config['warmup_iters']),
+                int(lr_schedule_config['cosine_cycle_iters']),
             )
             # Update learning rate in optimizer
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = lr
+            # breakpoint()
+            # for param_group in optimizer.param_groups:
+                # param_group['lr'] = lr
+            # nnx.update(optimizer, {'lr': lr}) # ? Is this correct?
+            optimizer.lr = lr
         else:
             lr = optimizer_config['lr']
 
         # Sample batch
         inputs, targets = get_batch_from_memmap(
-            RNGS, train_dataset, batch_size, context_length
+            rngs, train_dataset, batch_size, context_length
         )
 
         B, S = targets.shape
@@ -303,7 +306,7 @@ def train(config_path: str, use_wandb: bool = False, run_name: Optional[str] = N
 
             eval_iters = config['eval'].get('eval_iters', 100)
             losses = estimate_loss(
-                RNGS, model, train_dataset, val_dataset, config, eval_iters
+                rngs, model, train_dataset, val_dataset, config, eval_iters
             )
 
             print(f"Train Loss: {losses['train']:.4f}")
