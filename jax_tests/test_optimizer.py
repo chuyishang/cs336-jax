@@ -39,15 +39,34 @@ def _optimize(opt_class) -> State:
     return jnp.concatenate(jax.tree.leaves(nnx.state(model)))
 
 
+# def test_adamw(numpy_snapshot):
+    # """
+    # Our reference implementation yields slightly different results than the
+    # Optax AdamW, since there are a couple different ways that you can apply
+    # weight decay that are equivalent in principle, but differ in practice due to
+    # floating point behavior. So, we test that the provided implementation matches
+    # _either_ our reference implementation's expected results or those from the Optax AdamW.
+    # """
+    # # expected_weights = torch.load(FIXTURES_PATH / "adamw_expected_params.pt")
+    # optax_weights = _optimize(lambda model, lr, weight_decay, betas, eps: nnx.Optimizer(model, optax.adamw(learning_rate=lr, weight_decay=weight_decay, b1=betas[0], b2=betas[1], eps=eps), wrt=nnx.Param))
+    # actual_weights = _optimize(get_adamw_cls())
+
+    # # Might need to exit early if the weights match optax, since that should also be valid
+    # matches_optax = jnp.allclose(actual_weights, optax_weights, atol=1e-4)
+    # if matches_optax:
+        # return
+
+    # numpy_snapshot.assert_match(
+        # actual_weights,
+        # atol=1e-4,
+    # )
+
+
 def test_adamw(numpy_snapshot):
     """
-    Our reference implementation yields slightly different results than the
-    Optax AdamW, since there are a couple different ways that you can apply
-    weight decay that are equivalent in principle, but differ in practice due to
-    floating point behavior. So, we test that the provided implementation matches
-    _either_ our reference implementation's expected results or those from the Optax AdamW.
+    Test the new function-based AdamW optimizer that uses optax.
+    This should also match either the reference implementation or optax.
     """
-    # expected_weights = torch.load(FIXTURES_PATH / "adamw_expected_params.pt")
     optax_weights = _optimize(lambda model, lr, weight_decay, betas, eps: nnx.Optimizer(model, optax.adamw(learning_rate=lr, weight_decay=weight_decay, b1=betas[0], b2=betas[1], eps=eps), wrt=nnx.Param))
     actual_weights = _optimize(get_adamw_cls())
 

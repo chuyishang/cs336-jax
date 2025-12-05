@@ -56,6 +56,7 @@ def test_checkpointing(tmp_path):
 
     model = _TestNet(rngs=nnx.Rngs(0), d_input=d_input, d_output=d_output)
     optimizer = get_adamw_cls()(
+        model=model,
         lr=1e-3,
         weight_decay=0.01,
         betas=(0.9, 0.999),
@@ -82,6 +83,7 @@ def test_checkpointing(tmp_path):
     # Load the model back again
     new_model = _TestNet(rngs=nnx.Rngs(0), d_input=d_input, d_output=d_output)
     new_optimizer = get_adamw_cls()(
+        model=new_model,
         lr=1e-3,
         weight_decay=0.01,
         betas=(0.9, 0.999),
@@ -92,9 +94,9 @@ def test_checkpointing(tmp_path):
 
     # Compare the loaded model state with the original model state
     original_model_state = nnx.state(model)
-    original_optimizer_state = optimizer.state
+    original_optimizer_state = nnx.state(optimizer)
     new_model_state = nnx.state(new_model)
-    new_optimizer_state = new_optimizer.state
+    new_optimizer_state = nnx.state(new_optimizer)
 
     # Check that state dict keys match
     assert set(get_keys_of_pytree(original_model_state)) == set(get_keys_of_pytree(new_model_state))

@@ -586,11 +586,25 @@ def run_gradient_clipping(gradient_state: State, max_l2_norm: float) -> State:
     return model.gradient_clipping(gradient_state, max_l2_norm)
 
 
-def get_adamw_cls() -> Any:
+# def get_adamw_cls() -> Any:
+    # """
+    # Returns a torch.optim.Optimizer that implements AdamW.
+    # """
+    # return model.AdamW
+
+
+def get_adamw_cls():
     """
-    Returns a torch.optim.Optimizer that implements AdamW.
+    Returns a function that creates an nnx.Optimizer with the custom adamw optax gradient transformation.
     """
-    return model.AdamW
+    from cs336_jax_basics import model as model_module
+    def create_optimizer(model, lr=1e-3, weight_decay=0.01, betas=(0.9, 0.999), eps=1e-8):
+        return nnx.Optimizer(
+            model,
+            model_module.adamw(lr=lr, weight_decay=weight_decay, betas=betas, eps=eps),
+            wrt=nnx.Param
+        )
+    return create_optimizer
 
 
 def run_get_lr_cosine_schedule(

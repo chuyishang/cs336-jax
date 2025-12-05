@@ -363,9 +363,10 @@ def scale_by_adamw(
     return optax.GradientTransformation(init_fn, update_fn)
 
 def adamw(lr: float = 1e-3, betas: tuple[float, float] = (0.9, 0.999), weight_decay: float = 0.01, eps: float = 1e-8) -> optax.GradientTransformation:
-    return optax.combine.chain(
-        optax.scale_by_adam(beta1=betas[0], beta2=betas[1], eps=eps, weight_decay=weight_decay),
-        optax.transform.scale_by_learning_rate(lr) # this actually scales with a negative coefficient!
+    return optax.chain(
+        optax.scale_by_adam(b1=betas[0], b2=betas[1], eps=eps),
+        optax.add_decayed_weights(weight_decay),
+        optax.scale_by_learning_rate(lr) # this actually scales with a negative coefficient!
     )
 
 
@@ -446,7 +447,7 @@ def save_checkpoint(
     out,
 ):
     state = nnx.state(model)
-    optimizer_state = optimizer.state
+    optimizer_state = nnx.state(optimizer)
     obj = {
         "model": state,
         "optimizer": optimizer_state,
@@ -464,7 +465,7 @@ def load_checkpoint(
     with open(src, "rb") as f:
         obj = pickle.load(f)
     nnx.update(model, obj["model"])
-    optimizer.state = obj["optimizer"]
+    nnx.update(optimizer, obj["optimizer"])
 
     return obj["iteration"]
 
