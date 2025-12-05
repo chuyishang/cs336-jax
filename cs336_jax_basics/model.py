@@ -1,5 +1,6 @@
 import torch
 import os
+from typing import NamedTuple
 from torch import nn
 from einops import rearrange, einsum
 from jaxtyping import Float, Int
@@ -7,9 +8,9 @@ from torch import Tensor
 import jax
 from jax import Array, Device
 import jax.numpy as jnp
-import flax
 from flax import nnx
 from flax.nnx import State
+import optax
 import numpy.typing as npt
 from collections.abc import Callable, Iterable
 from typing import Optional
@@ -322,41 +323,87 @@ def cross_entropy_loss(inputs: Float[Array, " batch_size vocab_size"], targets: 
     return loss
 
 
-class AdamW:
-    def __init__(self, lr=1e-3, betas = (0.9, 0.999), weight_decay = 0.01, eps = 1e-8):
-        if lr < 0:
-            raise ValueError("Invalid learning rate: {lr}")
-        if not 0.0 <= betas[0] < 1.0:
-            raise ValueError(f"Invalid beta1 value: {betas[0]}")
-        if not 0.0 <= betas[1] < 1.0:
-            raise ValueError(f"Invalid beta2 value: {betas[1]}")
-        self.lr = float(lr)
-        self.betas = tuple(float(b) for b in betas)
-        self.weight_decay = float(weight_decay)
-        self.eps = float(eps)
-        self.state = None
-    
-    def update(self, model: nnx.Module, grad_state: State):
-        # Only get parameters (not all state)
-        params = nnx.state(model, nnx.Param)
-        if self.state is None:
-            self.state = jax.tree.map(lambda p: {
-                'm': jnp.zeros_like(p),
-                'v': jnp.zeros_like(p),
-                't': 0
-            }, params)
-        def update_param(param: Array, grad: Array, state: dict) -> Array:
-            state['t'] += 1
-            state['m'] = self.betas[0] * state['m'] + (1 - self.betas[0]) * grad
-            state['v'] = self.betas[1] * state['v'] + (1 - self.betas[1]) * grad ** 2
-            state['lr'] = self.lr * (1 - self.betas[1] ** state['t']) ** 0.5 / (1 - self.betas[0] ** state['t'])
-            param = param - state['lr'] * state['m'] / (state['v'] ** 0.5 + self.eps)
-            param = param * (1 - self.lr * self.weight_decay)
-            return param
+class AdamWState(NamedTuple):
+    m: optax.Updates
+    v: optax.Updates
+    t: jax.Array
 
-        # Use tree_map to update only leaves that exist in all three trees
-        params = jax.tree.map(update_param, params, grad_state, self.state)
-        nnx.update(model, params)
+def scale_by_adamw(
+    # betas: tuple[float, float],
+    b1: float = 0.9,
+    b2: float = 0.999,
+    eps: float = 1e-8,
+    weight_decay: float = 0.01,
+) -> optax.GradientTransformation:
+    def init_fn(params):
+        """Initializes the AdamW state."""
+        m = jax.tree.map(jnp.zeros_like, params)
+        v = jax.tree.map(jnp.zeros_like, params)
+        step = jnp.zeros([], dtype=jnp.int32)
+        return AdamWState(m=m, v=v, t=step)
+
+    
+    def update_fn(grad: optax.Updates, state: AdamWState, params: Optional[optax.base.Params]):
+        """Compute parameter updates"""
+        t = state.t + 1
+        m = jax.tree.map(lambda m_prev, g: b1 * m_prev + (1 - b1) * g, state.m, grad)
+        v = jax.tree.map(lambda v_prev, g: b2 * v_prev + (1 - b2) * g ** 2, state.v, grad)
+        bias_correction = jnp.sqrt(1 - b2 ** t) / (1 - b1 ** t) # this is for adjusting the learning rate
+
+        def compute_update(m_t, v_t, p):
+            # NOTE: these are positive here since scale_by_learning_rate scales with a negative coefficient
+            update = bias_correction * m_t / (jnp.sqrt(v_t) + eps)
+            update = update + weight_decay * p
+            return update
+        
+        update = jax.tree.map(compute_update, m, v, params)
+        new_state = AdamWState(m=m, v=v, t=t)
+        return update, new_state
+    
+    return optax.GradientTransformation(init_fn, update_fn)
+
+def adamw(lr: float = 1e-3, betas: tuple[float, float] = (0.9, 0.999), weight_decay: float = 0.01, eps: float = 1e-8) -> optax.GradientTransformation:
+    return optax.combine.chain(
+        optax.scale_by_adam(beta1=betas[0], beta2=betas[1], eps=eps, weight_decay=weight_decay),
+        optax.transform.scale_by_learning_rate(lr) # this actually scales with a negative coefficient!
+    )
+
+
+# class AdamW:
+    # def __init__(self, lr=1e-3, betas = (0.9, 0.999), weight_decay = 0.01, eps = 1e-8):
+        # if lr < 0:
+            # raise ValueError("Invalid learning rate: {lr}")
+        # if not 0.0 <= betas[0] < 1.0:
+            # raise ValueError(f"Invalid beta1 value: {betas[0]}")
+        # if not 0.0 <= betas[1] < 1.0:
+            # raise ValueError(f"Invalid beta2 value: {betas[1]}")
+        # self.lr = float(lr)
+        # self.betas = tuple(float(b) for b in betas)
+        # self.weight_decay = float(weight_decay)
+        # self.eps = float(eps)
+        # self.state = None
+    
+    # def update(self, model: nnx.Module, grad_state: State):
+        # # Only get parameters (not all state)
+        # params = nnx.state(model, nnx.Param)
+        # if self.state is None:
+            # self.state = jax.tree.map(lambda p: {
+                # 'm': jnp.zeros_like(p),
+                # 'v': jnp.zeros_like(p),
+                # 't': 0
+            # }, params)
+        # def update_param(param: Array, grad: Array, state: dict) -> Array:
+            # state['t'] += 1
+            # state['m'] = self.betas[0] * state['m'] + (1 - self.betas[0]) * grad
+            # state['v'] = self.betas[1] * state['v'] + (1 - self.betas[1]) * grad ** 2
+            # state['lr'] = self.lr * (1 - self.betas[1] ** state['t']) ** 0.5 / (1 - self.betas[0] ** state['t'])
+            # param = param - state['lr'] * state['m'] / (state['v'] ** 0.5 + self.eps)
+            # param = param * (1 - self.lr * self.weight_decay)
+            # return param
+
+        # # Use tree_map to update only leaves that exist in all three trees
+        # params = jax.tree.map(update_param, params, grad_state, self.state)
+        # nnx.update(model, params)
 
 
 def get_lr_schedule(t: int, a_max: float, a_min: float, warmup_iters: int, cosine_annealing_iters: int) -> float:
